@@ -1,0 +1,50 @@
+{
+  "name": "athena-cli",
+  "version": "0.1.0",
+  "description": "Athena — local-first project intelligence layer for AI coding agents",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "athena": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run typecheck && npm run build && npm test"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "claude-code",
+    "cursor",
+    "context",
+    "cli",
+    "developer-tools"
+  ],
+  "dependencies": {
+    "@babel/parser": "^8.0.5",
+    "commander": "^15.0.0",
+    "ignore": "^7.0.9",
+    "picocolors": "^1.1.1",
+    "smol-toml": "^1.8.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "tsup": "^8.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}
