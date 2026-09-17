@@ -25,6 +25,10 @@ export function setOutputMode(opts: { quiet?: boolean; json?: boolean }): void {
 export const isJson = () => jsonMode;
 export const isQuiet = () => quiet;
 
+let interruptMessage = 'No partial knowledge was written.';
+export const setInterruptMessage = (m: string) => (interruptMessage = m);
+export const getInterruptMessage = () => interruptMessage;
+
 export function line(s = ''): void {
   if (jsonMode) return;
   out.write(`${s}\n`);

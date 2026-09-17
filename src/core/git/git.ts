@@ -116,3 +116,34 @@ export async function changesSince(cwd: string, fromRef: string): Promise<Change
   }
   return stripPrefix(out, prefix);
 }
+
+export interface CommitSummary {
+  sha: string;
+  subject: string;
+}
+
+export interface HeadMovement {
+  /** Commits reachable from `to` but not `from` (newest first), when `from` is an ancestor. */
+  commits: CommitSummary[];
+  /** True when `from` is not an ancestor of `to` (branch switch, rebase, reset). */
+  diverged: boolean;
+  truncated: boolean;
+}
+
+export async function headMovement(cwd: string, from: string, to: string, limit = 20): Promise<HeadMovement | null> {
+  if (!/^[0-9a-f]{7,64}$/i.test(from) || !/^[0-9a-f]{7,64}$/i.test(to)) return null;
+  if (from === to) return { commits: [], diverged: false, truncated: false };
+  const exists = await git(cwd, ['cat-file', '-e', `${from}^{commit}`]);
+  if (!exists.ok) return { commits: [], diverged: true, truncated: false };
+  const ancestor = await git(cwd, ['merge-base', '--is-ancestor', from, to]);
+  const log = await git(cwd, ['log', `-n${limit + 1}`, '--format=%H%x1f%s', `${from}..${to}`]);
+  if (!log.ok) return null;
+  const commits = log.stdout
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => {
+      const [sha, subject] = l.split('\x1f');
+      return { sha: sha!, subject: subject ?? '' };
+    });
+  return { commits: commits.slice(0, limit), diverged: !ancestor.ok, truncated: commits.length > limit };
+}

@@ -1,6 +1,6 @@
 import type { AgentAdapter } from '../../core/agents/adapter.js';
 import { athenaInstructions } from '../common/instructions.js';
-import { anyExists, checkBlock, planBlock, removeBlockFrom } from '../common/files.js';
+import { checkBlock, planBlock, removeBlockFrom, userEvidence } from '../common/files.js';
 
 /**
  * AGENTS.md is an open, cross-tool instruction file convention read by many
@@ -13,7 +13,7 @@ export const agentsMdAdapter: AgentAdapter = {
   capabilities: { instructionsFile: true, scopedRules: false, hooks: false, mcp: false },
   supportNote: 'Manages a marked block in AGENTS.md for agents that read the AGENTS.md convention.',
   async detectPresence(root) {
-    const evidence = await anyExists(root, ['AGENTS.md']);
+    const evidence = await userEvidence(root, { files: ['AGENTS.md'] });
     return { detectedInProject: evidence.length > 0, evidence };
   },
   async plan(ctx) {

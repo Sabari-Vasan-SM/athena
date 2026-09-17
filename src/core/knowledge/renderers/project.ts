@@ -10,7 +10,13 @@ export function renderProject(m: ProjectModel): Section[] {
     : `${unknown('Project purpose', 'no description found in manifests. Describe the project in Developer Notes below.')}`;
   sections.push({ id: 'overview', content: `## Overview\n\n**Name:** ${esc(m.name)}\n\n${purpose}` });
 
-  const langRows = m.languages.slice(0, 12).map((l) => [esc(l.name), String(l.files), formatBytes(l.bytes)]);
+  // Rounded shares keep this section stable: adding one file should not churn the document.
+  const totalBytes = m.languages.reduce((n, l) => n + l.bytes, 0) || 1;
+  const share = (bytes: number) => {
+    const pct = (bytes / totalBytes) * 100;
+    return pct < 5 ? '<5%' : `~${Math.round(pct / 5) * 5}%`;
+  };
+  const langRows = m.languages.slice(0, 12).map((l) => [esc(l.name), share(l.bytes)]);
   sections.push({
     id: 'technologies',
     content: [
@@ -18,7 +24,7 @@ export function renderProject(m: ProjectModel): Section[] {
       '',
       '### Languages',
       '',
-      langRows.length ? table(['Language', 'Files', 'Size'], langRows) : notDetected('source languages'),
+      langRows.length ? table(['Language', 'Share of source'], langRows) : notDetected('source languages'),
       '',
       '### Frameworks & Libraries',
       '',
@@ -36,8 +42,7 @@ export function renderProject(m: ProjectModel): Section[] {
 
   const ws = m.workspace;
   const structure: string[] = ['## Structure', ''];
-  structure.push(`**Files analyzed:** ${m.stats.filesScanned}${m.stats.skippedLarge ? ` · ${m.stats.skippedLarge} large files indexed by metadata only` : ''}${m.stats.skippedBinary ? ` · ${m.stats.skippedBinary} binary` : ''}`);
-  structure.push('', `**Top-level directories:** ${m.topLevelDirs.length ? m.topLevelDirs.map(code).join(', ') : '_none_'}`);
+  structure.push(`**Top-level directories:** ${m.topLevelDirs.length ? m.topLevelDirs.map(code).join(', ') : '_none_'}`);
   if (ws.isMonorepo) {
     structure.push('', `**Monorepo:** yes${ws.tool ? ` (${esc(ws.tool)})` : ''} — DETECTED`, '');
     structure.push(table(['Package', 'Path', 'Kind', 'Ecosystem', 'Internal deps'], ws.packages.map((p) => [esc(p.name), code(p.path), p.kind, p.ecosystem, p.internalDependencies.map(esc).join(', ') || '—'])));

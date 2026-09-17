@@ -2,9 +2,9 @@ import path from 'node:path';
 import { readState } from '../../core/state/state.js';
 import { resolveAdapters, ADAPTERS } from '../../agents/registry.js';
 import type { AgentAdapter } from '../../core/agents/adapter.js';
-import { runPipeline, type PipelineResult } from '../pipeline.js';
+import { runPipeline, type PipelineResult } from '../../services/pipeline.js';
 import { resolveCwd, type GlobalOptions } from '../context.js';
-import { AthenaError } from '../errors.js';
+import { AthenaError } from '../../services/errors.js';
 import * as ui from '../ui/term.js';
 
 export interface InitOptions extends GlobalOptions {

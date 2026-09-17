@@ -27,7 +27,8 @@ Add an entry to `src/core/analyzer/catalog.ts`, with `markers` for config files 
 1. Implement `Detector` in `src/core/analyzer/detectors/` and give it a `version`.
 2. Register it in `DETECTORS` (`analyze.ts`). Order matters when you read earlier results.
 3. Extend `ProjectModel` (zod) if you need new fields, and render them in `core/knowledge/renderers/`.
-4. Add impact rules in `core/impact/impact.ts` for the files it reads.
+4. Add impact rules in `core/impact/impact.ts` for the files it reads, and map new model fields to documents in `core/impact/model-diff.ts` (`MODEL_SECTIONS`) so sync proposals can explain changes.
+5. Keep rendered output stable: no volatile counts or sizes in generated sections.
 
 ## Adding an agent adapter
 

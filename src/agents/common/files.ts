@@ -54,3 +54,41 @@ export async function anyExists(root: string, rels: string[]): Promise<string[]>
   for (const r of rels) if (await exists(path.join(root, r))) found.push(r);
   return found;
 }
+
+/**
+ * Evidence that the developer uses an agent, excluding anything Athena itself created.
+ * - `files`: a file counts if it exists and has content outside Athena's block/marker.
+ * - `dirs`: a directory counts if it contains any entry other than Athena-owned paths.
+ */
+export async function userEvidence(root: string, spec: { files?: string[]; dirs?: string[]; athenaOwned?: string[] }): Promise<string[]> {
+  const found: string[] = [];
+  const owned = new Set(spec.athenaOwned ?? []);
+  for (const rel of spec.files ?? []) {
+    const text = await readTextIfExists(path.join(root, rel)).catch(() => null);
+    if (text === null) continue;
+    if (text.includes(OWNED_HEADER)) continue; // entirely Athena-owned
+    if (removeIntegrationBlock(text).trim()) found.push(rel); // content besides Athena's block
+  }
+  for (const rel of spec.dirs ?? []) {
+    if (await hasNonAthenaEntries(path.join(root, rel), root, owned)) found.push(rel);
+  }
+  return found;
+}
+
+async function hasNonAthenaEntries(dir: string, root: string, owned: Set<string>): Promise<boolean> {
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const e of entries) {
+    const abs = path.join(dir, e.name);
+    const rel = path.relative(root, abs).split(path.sep).join('/');
+    if (owned.has(rel)) continue;
+    if (e.isDirectory()) {
+      if (await hasNonAthenaEntries(abs, root, owned)) return true;
+    } else return true;
+  }
+  return false;
+}

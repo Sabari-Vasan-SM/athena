@@ -31,6 +31,19 @@ describe('module boundaries', () => {
     }
   });
 
+  it('services do not depend on cli or server; server does not depend on cli', async () => {
+    const check = async (layer: string, forbidden: string[]) => {
+      for (const file of await sourceFiles(path.join(REPO_ROOT, 'src', layer))) {
+        for (const spec of await imports(file)) {
+          const target = path.resolve(path.dirname(file), spec);
+          for (const f of forbidden) expect(target.startsWith(path.join(REPO_ROOT, 'src', f)), `${path.relative(REPO_ROOT, file)} imports ${spec}`).toBe(false);
+        }
+      }
+    };
+    await check('services', ['cli', 'server']);
+    await check('server', ['cli']);
+  });
+
   it('agents do not depend on cli', async () => {
     const agents = path.join(REPO_ROOT, 'src/agents');
     for (const file of await sourceFiles(agents)) {

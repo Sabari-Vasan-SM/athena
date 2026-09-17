@@ -32,7 +32,7 @@ export const AthenaState = z.object({
   analysisDurationMs: z.number(),
   git: z.object({ isRepo: z.boolean(), head: z.string().optional(), branch: z.string().optional() }),
   /** Repo-relative path → content hash/size/mtime. Basis for incremental analysis. */
-  fileIndex: z.record(z.string(), z.object({ h: z.string(), s: z.number(), m: z.number() })),
+  fileIndex: z.record(z.string(), z.object({ h: z.string(), s: z.number(), m: z.number(), b: z.literal(1).optional() })),
   documents: z.record(z.string(), DocumentState),
   detectors: z.record(z.string(), z.number()),
   agents: z.record(z.string(), AgentState),
@@ -92,7 +92,7 @@ export async function backupCorruptedState(dir: string): Promise<string | null> 
 
 export function buildFileIndex(files: FileEntry[]): AthenaState['fileIndex'] {
   const idx: AthenaState['fileIndex'] = {};
-  for (const f of files) idx[f.path] = { h: f.hash.startsWith('meta:') ? f.hash : f.hash.slice(0, 16), s: f.size, m: f.mtimeMs };
+  for (const f of files) idx[f.path] = { h: f.hash.startsWith('meta:') ? f.hash : f.hash.slice(0, 16), s: f.size, m: f.mtimeMs, ...(f.binary ? { b: 1 as const } : {}) };
   return idx;
 }
 

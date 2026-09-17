@@ -191,7 +191,7 @@ describe('athena CLI', () => {
     const notInit = await runCli(['status'], dir);
     expect(notInit.code).toBe(3);
     expect(notInit.stderr).toContain('athena init');
-    const planned = await runCli(['watch'], dir);
+    const planned = await runCli(['security'], dir);
     expect(planned.code).toBe(2);
     expect(planned.stdout).toContain('Not available yet');
     const unknown = await runCli(['init', '--agents', 'copilotx'], dir);
@@ -210,5 +210,62 @@ describe('athena CLI', () => {
     const s = JSON.parse((await runCli(['status', '--json'], sub)).stdout);
     expect(s.changes.added).toEqual(['index.ts']);
     expect(s.git.uncommitted).toBe(1);
+  });
+});
+
+describe('agent presence detection', () => {
+  it('does not count files Athena created as evidence of an agent', async () => {
+    const { ADAPTERS } = await import('../../src/agents/registry.js');
+    const dir = await makeProject({ 'a.txt': 'x' });
+    await runCli(['init', '--agents', 'all'], dir);
+    for (const a of ADAPTERS) expect((await a.detectPresence(dir)).evidence, a.id).toEqual([]);
+
+    await fs.writeFile(path.join(dir, '.cursor/rules/team.mdc'), 'team rule');
+    await fs.appendFile(path.join(dir, 'CLAUDE.md'), '\nUse pnpm.\n');
+    const byId = Object.fromEntries(await Promise.all(ADAPTERS.map(async (a) => [a.id, (await a.detectPresence(dir)).evidence])));
+    expect(byId['cursor']).toEqual(['.cursor']);
+    expect(byId['claude-code']).toEqual(['CLAUDE.md']);
+    expect(byId['antigravity']).toEqual([]);
+  });
+});
+
+describe('build output', () => {
+  it('rebuilding the CLI does not delete the web UI build', async () => {
+    const marker = path.join(REPO_ROOT, 'dist/web/keep-test.html');
+    await fs.mkdir(path.dirname(marker), { recursive: true });
+    await fs.writeFile(marker, 'x');
+    try {
+      await new Promise<void>((resolve, reject) => execFile('npx', ['tsup'], { cwd: REPO_ROOT, shell: process.platform === 'win32' }, (err) => (err ? reject(err) : resolve())));
+      await expect(fs.access(marker)).resolves.toBeUndefined();
+    } finally {
+      await fs.rm(marker, { force: true });
+    }
+  }, 120_000);
+});
+
+describe('athena sync (CLI)', () => {
+  it('checks, dry-runs, refuses to apply without confirmation, and applies with --yes', async () => {
+    const dir = await makeProject({ 'package.json': JSON.stringify({ name: 'shop', dependencies: { express: '5' } }), 'src/app.ts': "import express from 'express';\nconst app = express();\napp.get('/a', h);\n" });
+    await runCli(['init', '--no-agents'], dir);
+    expect((await runCli(['sync', '--check'], dir)).code).toBe(0);
+
+    await fs.appendFile(path.join(dir, 'src/app.ts'), "app.post('/b', h);\n");
+    const check = await runCli(['sync', '--check', '--json'], dir);
+    expect(check.code).toBe(1);
+    expect(JSON.parse(check.stdout).documents.map((d: { file: string }) => d.file)).toContain('api.md');
+
+    const before = await read(dir, '.athena/api.md');
+    const dry = await runCli(['sync', '--dry-run', '--diff'], dir);
+    expect(dry.code).toBe(0);
+    expect(dry.stdout).toContain('+| POST | `/b`');
+    const noTty = await runCli(['sync'], dir);
+    expect(noTty.stdout).toContain('confirmation required');
+    expect(await read(dir, '.athena/api.md')).toBe(before);
+
+    const yes = await runCli(['sync', '--yes'], dir);
+    expect(yes.code, yes.stderr).toBe(0);
+    expect(yes.stdout).toContain('Updated');
+    expect(await read(dir, '.athena/api.md')).toContain('/b');
+    expect((await runCli(['sync', '--check'], dir)).code).toBe(0);
   });
 });

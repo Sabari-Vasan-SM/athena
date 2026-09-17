@@ -3,7 +3,7 @@ import { createInterface } from 'node:readline/promises';
 import { athenaDir } from '../../core/state/state.js';
 import { ADAPTERS } from '../../agents/registry.js';
 import { requireProjectRoot, type GlobalOptions } from '../context.js';
-import { AthenaError } from '../errors.js';
+import { AthenaError } from '../../services/errors.js';
 import * as ui from '../ui/term.js';
 
 export async function confirm(question: string): Promise<boolean> {

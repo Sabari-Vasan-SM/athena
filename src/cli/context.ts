@@ -1,7 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { ATHENA_DIR } from '../core/config.js';
-import { AthenaError, EXIT } from './errors.js';
+import { AthenaError, EXIT } from '../services/errors.js';
+import { findProjectRoot } from '../services/project.js';
+
+export { findProjectRoot };
 
 export interface GlobalOptions {
   cwd?: string;
@@ -20,22 +22,6 @@ export async function resolveCwd(opts: GlobalOptions): Promise<string> {
   } catch (err) {
     if (err instanceof AthenaError) throw err;
     throw new AthenaError(`Directory not accessible: ${dir}`, 'Check the path and your permissions.');
-  }
-}
-
-/** Walk up from `start` to find the nearest directory containing `.athena/`. */
-export async function findProjectRoot(start: string): Promise<string | null> {
-  let dir = start;
-  for (;;) {
-    try {
-      const st = await fs.stat(path.join(dir, ATHENA_DIR));
-      if (st.isDirectory()) return dir;
-    } catch {
-      /* keep walking */
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
   }
 }
 

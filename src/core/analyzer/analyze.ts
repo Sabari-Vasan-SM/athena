@@ -40,6 +40,8 @@ export interface AnalyzeOptions {
   config?: AthenaConfig;
   onStage?: (stage: AnalysisStage, detail?: string) => void;
   onDetector?: (id: string, ms: number) => void;
+  /** Previous file index: unchanged files (same size + mtime) are not re-hashed. */
+  reuse?: Record<string, { h: string; s: number; m: number; b?: 1 }>;
 }
 
 export interface AnalysisResult {
@@ -59,7 +61,7 @@ export async function analyzeProject(rootInput: string, opts: AnalyzeOptions = {
   if ('warning' in loaded && loaded.warning) model.warnings.push(loaded.warning);
 
   opts.onStage?.('scan');
-  const walk = await walkProject(root, { config, signal: opts.signal });
+  const walk = await walkProject(root, { config, signal: opts.signal, reuse: opts.reuse });
   model.stats = {
     filesScanned: walk.files.length,
     skippedBinary: walk.skippedBinary,

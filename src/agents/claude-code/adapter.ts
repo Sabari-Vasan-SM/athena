@@ -1,6 +1,6 @@
 import type { AgentAdapter } from '../../core/agents/adapter.js';
 import { athenaInstructions } from '../common/instructions.js';
-import { anyExists, checkBlock, planBlock, removeBlockFrom } from '../common/files.js';
+import { checkBlock, planBlock, removeBlockFrom, userEvidence } from '../common/files.js';
 
 /**
  * Claude Code reads project memory from CLAUDE.md and supports `@path` imports.
@@ -13,7 +13,7 @@ export const claudeCodeAdapter: AgentAdapter = {
   capabilities: { instructionsFile: true, scopedRules: false, hooks: true, mcp: true },
   supportNote: 'Uses CLAUDE.md with an @-import of .athena/rules.md. Hooks-based activity observation is planned (Phase 4).',
   async detectPresence(root) {
-    const evidence = await anyExists(root, ['CLAUDE.md', '.claude', '.claude/settings.json', 'CLAUDE.local.md', '.mcp.json']);
+    const evidence = await userEvidence(root, { files: ['CLAUDE.md', 'CLAUDE.local.md', '.mcp.json'], dirs: ['.claude'] });
     return { detectedInProject: evidence.length > 0, evidence };
   },
   async plan(ctx) {

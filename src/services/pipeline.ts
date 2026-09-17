@@ -36,11 +36,13 @@ const ATHENA_GITIGNORE = [
   'state.json',
   'model.json',
   '.backup/',
+  '.server.json',
+  '.sync-ignore.json',
   '',
 ].join('\n');
 
 /** Include files Athena itself just wrote (agent integrations) so they don't show up as external changes. */
-async function indexWithIntegrations(root: string, files: FileEntry[], written: string[]): Promise<AthenaState['fileIndex']> {
+export async function indexWithIntegrations(root: string, files: FileEntry[], written: string[]): Promise<AthenaState['fileIndex']> {
   const index = buildFileIndex(files);
   for (const rel of written) {
     try {
@@ -52,6 +54,38 @@ async function indexWithIntegrations(root: string, files: FileEntry[], written: 
     }
   }
   return index;
+}
+
+/** Build the next state.json from an analysis and the documents written for it. */
+export function composeState(input: { prevState: AthenaState | null; analysis: AnalysisResult; docs: DocWriteReport[]; agents: AthenaState['agents']; fileIndex: AthenaState['fileIndex'] }): AthenaState {
+  const { prevState, analysis, docs } = input;
+  const now = new Date().toISOString();
+  const documents: AthenaState['documents'] = {};
+  for (const d of docs) {
+    const before = prevState?.documents[d.id];
+    documents[d.id] = {
+      file: d.file,
+      blocks: d.blocks,
+      lastGeneratedAt: now,
+      lastChangedAt: d.status === 'unchanged' && before ? before.lastChangedAt : now,
+      contentHash: d.contentHash,
+      preservedModified: d.preservedModified,
+    };
+  }
+  return {
+    schemaVersion: 1,
+    athenaVersion: ATHENA_VERSION,
+    projectName: analysis.model.name,
+    createdAt: prevState?.createdAt ?? now,
+    analyzedAt: now,
+    analysisDurationMs: analysis.durationMs,
+    git: { isRepo: analysis.model.git.isRepo, head: analysis.model.git.head, branch: analysis.model.git.branch },
+    fileIndex: input.fileIndex,
+    documents,
+    detectors: analysis.detectorVersions,
+    agents: input.agents,
+    warnings: analysis.model.warnings,
+  };
 }
 
 /** Default adapter selection for init: agents detected in the project, plus the cross-agent AGENTS.md. */
@@ -76,7 +110,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   const prevState = prev.kind === 'ok' ? prev.state : null;
 
   opts.onStage?.('analyze');
-  const analysis = await analyzeProject(root, { signal: opts.signal, onStage: (s) => opts.onStage?.(s) });
+  const analysis = await analyzeProject(root, { signal: opts.signal, onStage: (s) => opts.onStage?.(s), reuse: prevState?.fileIndex });
   opts.signal?.throwIfAborted();
 
   const adapters = opts.agents ?? (prevState ? ADAPTERS.filter((a) => prevState.agents[a.id]?.configured) : await autoSelectAdapters(root));
@@ -122,33 +156,13 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     }
   }
 
-  const now = new Date().toISOString();
-  const documents: AthenaState['documents'] = {};
-  for (const d of docs) {
-    const before = prevState?.documents[d.id];
-    documents[d.id] = {
-      file: d.file,
-      blocks: d.blocks,
-      lastGeneratedAt: now,
-      lastChangedAt: d.status === 'unchanged' && before ? before.lastChangedAt : now,
-      contentHash: d.contentHash,
-      preservedModified: d.preservedModified,
-    };
-  }
-  const state: AthenaState = {
-    schemaVersion: 1,
-    athenaVersion: ATHENA_VERSION,
-    projectName: analysis.model.name,
-    createdAt: prevState?.createdAt ?? now,
-    analyzedAt: now,
-    analysisDurationMs: analysis.durationMs,
-    git: { isRepo: analysis.model.git.isRepo, head: analysis.model.git.head, branch: analysis.model.git.branch },
-    fileIndex: await indexWithIntegrations(root, analysis.files, agentChanges.flatMap((a) => a.changes.map((c) => c.path))),
-    documents,
-    detectors: analysis.detectorVersions,
+  const state = composeState({
+    prevState,
+    analysis,
+    docs,
     agents: agentsState,
-    warnings: analysis.model.warnings,
-  };
+    fileIndex: await indexWithIntegrations(root, analysis.files, agentChanges.flatMap((a) => a.changes.map((c) => c.path))),
+  });
   await writeState(finalDir, state);
   return { analysis, docs, agentChanges, state, notes };
 }

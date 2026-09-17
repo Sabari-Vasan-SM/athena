@@ -1,6 +1,6 @@
 import { Command, Option } from 'commander';
-import { ATHENA_VERSION } from './version.js';
-import { AthenaError, EXIT } from './errors.js';
+import { ATHENA_VERSION } from '../services/version.js';
+import { AthenaError, EXIT } from '../services/errors.js';
 import * as ui from './ui/term.js';
 import type { GlobalOptions } from './context.js';
 import { initCommand } from './commands/init.js';
@@ -9,6 +9,9 @@ import { statusCommand } from './commands/status.js';
 import { doctorCommand } from './commands/doctor.js';
 import { rulesAddCommand, rulesDisableCommand, rulesEditCommand, rulesEnableCommand, rulesListCommand, rulesRemoveCommand } from './commands/rules.js';
 import { cleanCommand } from './commands/clean.js';
+import { openCommand } from './commands/open.js';
+import { syncCommand } from './commands/sync.js';
+import { watchCommand } from './commands/watch.js';
 import { agentsAddCommand, agentsListCommand, agentsRemoveCommand } from './commands/agents.js';
 
 const controller = new AbortController();
@@ -18,16 +21,13 @@ function onSignal(): void {
   if (interrupted) process.exit(EXIT.INTERRUPTED); // second Ctrl+C: exit immediately
   interrupted = true;
   controller.abort(new Error('Interrupted'));
-  process.stdout.write('\x1b[?25h');
-  if (!ui.isJson()) process.stderr.write(`\n${ui.c.yellow('Interrupted.')} ${ui.dim('No partial knowledge was written.')}\n`);
+  if (process.stdout.isTTY) process.stdout.write('\x1b[?25h');
+  if (!ui.isJson()) process.stderr.write(`\n${ui.c.yellow('Interrupted.')} ${ui.dim(ui.getInterruptMessage())}\n`);
 }
 process.on('SIGINT', onSignal);
 process.on('SIGTERM', onSignal);
 
 const PLANNED: Array<{ name: string; description: string; phase: number }> = [
-  { name: 'open', description: 'Open the local Athena web UI', phase: 2 },
-  { name: 'watch', description: 'Watch the project and keep knowledge synchronized', phase: 3 },
-  { name: 'sync', description: 'Incrementally update knowledge affected by recent changes', phase: 3 },
   { name: 'security', description: 'Run security analysis (dependency audit, secret scan report)', phase: 5 },
   { name: 'review', description: 'Review the current diff against rules and code-review.md', phase: 5 },
   { name: 'architecture', description: 'Explore the project graph and architecture', phase: 6 },
@@ -81,6 +81,23 @@ export function buildProgram(): Command {
     .action(run(async (o: { force?: boolean; agents?: string }, cmd: Command) => analyzeCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
+    .command('sync')
+    .description('Review and apply knowledge updates for changes since the last analysis')
+    .option('-y, --yes', 'Apply without asking')
+    .option('--dry-run', 'Show the plan without writing')
+    .option('--check', 'Exit with code 1 if knowledge is out of date (for CI/hooks)')
+    .option('--diff', 'Print full diffs of proposed document changes')
+    .option('--force', 'Also regenerate sections that were edited by hand')
+    .action(run(async (o: { yes?: boolean; dryRun?: boolean; check?: boolean; diff?: boolean; force?: boolean }, cmd: Command) => syncCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+
+  program
+    .command('watch')
+    .description('Watch the project and propose knowledge updates as files change')
+    .option('--auto-apply', 'Apply updates automatically instead of proposing them')
+    .option('--debounce <ms>', 'Quiet period before checking changes (default 1500)')
+    .action(run(async (o: { autoApply?: boolean; debounce?: string }, cmd: Command) => watchCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+
+  program
     .command('status')
     .description('Show knowledge health and changes since the last analysis')
     .action(run(async (_o: unknown, cmd: Command) => statusCommand({ ...globals(cmd), signal: controller.signal })));
@@ -102,6 +119,16 @@ export function buildProgram(): Command {
   agents.command('list', { isDefault: true }).description('Show supported agents and integration status').action(run(async (_o: unknown, cmd: Command) => agentsListCommand(globals(cmd))));
   agents.command('add <agents...>').description('Configure integrations (claude-code, cursor, antigravity, agents-md, or "all")').action(run(async (names: string[], _o: unknown, cmd: Command) => agentsAddCommand(names, globals(cmd))));
   agents.command('remove <agents...>').description('Remove Athena-managed integration files/blocks').action(run(async (names: string[], _o: unknown, cmd: Command) => agentsRemoveCommand(names, globals(cmd))));
+
+  program
+    .command('open')
+    .description('Start (or reuse) the local web UI and open it in your browser')
+    .option('-p, --port <port>', 'Port to bind (default: first free port from 7432)')
+    .option('--host <host>', 'Interface to bind (default: 127.0.0.1)')
+    .option('--allow-remote', 'Allow binding to a non-loopback interface')
+    .option('--no-open', 'Do not launch a browser')
+    .option('--no-watch', 'Do not watch the project for changes')
+    .action(run(async (o: { port?: string; host?: string; open?: boolean; allowRemote?: boolean; watch?: boolean }, cmd: Command) => openCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
     .command('clean')
@@ -140,7 +167,7 @@ async function main(): Promise<void> {
   try {
     await program.parseAsync(process.argv);
   } catch (err) {
-    process.stdout.write('\x1b[?25h');
+    if (process.stdout.isTTY) process.stdout.write('\x1b[?25h');
     if (controller.signal.aborted) {
       process.exitCode = EXIT.INTERRUPTED;
       return;

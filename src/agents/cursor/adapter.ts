@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { AgentAdapter } from '../../core/agents/adapter.js';
 import { readTextIfExists } from '../../core/util/fs.js';
 import { athenaInstructions } from '../common/instructions.js';
-import { anyExists, OWNED_HEADER, planOwned, removeOwned } from '../common/files.js';
+import { OWNED_HEADER, planOwned, removeOwned, userEvidence } from '../common/files.js';
 
 const RULE_FILE = '.cursor/rules/athena.mdc';
 
@@ -16,7 +16,7 @@ export const cursorAdapter: AgentAdapter = {
   capabilities: { instructionsFile: true, scopedRules: true, hooks: true, mcp: true },
   supportNote: 'Uses an Athena-owned project rule at .cursor/rules/athena.mdc (alwaysApply).',
   async detectPresence(root) {
-    const evidence = await anyExists(root, ['.cursor', '.cursorrules', '.cursor/rules', '.cursor/mcp.json']);
+    const evidence = await userEvidence(root, { files: ['.cursorrules'], dirs: ['.cursor'], athenaOwned: [RULE_FILE] });
     return { detectedInProject: evidence.length > 0, evidence };
   },
   async plan(ctx) {

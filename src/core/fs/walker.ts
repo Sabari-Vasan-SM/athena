@@ -2,8 +2,8 @@ import { promises as fs } from 'node:fs';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import ignoreFactory, { type Ignore } from 'ignore';
-import { DEFAULT_IGNORES, type AthenaConfig } from '../config.js';
+import type { AthenaConfig } from '../config.js';
+import { IgnoreMatcher } from './ignore.js';
 import { toPosix } from '../util/paths.js';
 
 export interface FileEntry {
@@ -32,27 +32,22 @@ export interface WalkOptions {
   onProgress?: (scanned: number) => void;
   /**
    * Previous index (path → truncated hash/size/mtime). When size and mtime match, the
-   * previous hash is reused instead of re-reading the file. Entries produced this way
-   * have `binary: false` and must only be used for change detection, not analysis.
+   * previous hash (and binary flag) is reused instead of re-reading the file.
    */
-  reuse?: Record<string, { h: string; s: number; m: number }>;
+  reuse?: Record<string, { h: string; s: number; m: number; b?: 1 }>;
+  /** Share a matcher (e.g. with a watcher). Nested .gitignore files found during the walk are registered on it. */
+  matcher?: IgnoreMatcher;
 }
 
 const SNIFF_BYTES = 8000;
 
 export async function walkProject(root: string, opts: WalkOptions): Promise<WalkResult> {
   const rootReal = await fs.realpath(root);
-  const ig = await buildIgnore(rootReal, opts.config);
-  const includeIg = opts.config.include.length ? ignoreFactory().add(opts.config.include) : null;
+  const matcher = opts.matcher ?? (await IgnoreMatcher.load(rootReal, opts.config));
   const result: WalkResult = { files: [], skippedBinary: 0, skippedLarge: 0, skippedUnreadable: 0, truncated: false, warnings: [] };
   const visitedDirs = new Set<string>([rootReal]);
   const pending: string[] = [];
-
-  const isIgnored = (rel: string, isDir: boolean): boolean => {
-    const test = isDir ? `${rel}/` : rel;
-    if (includeIg?.ignores(test)) return false;
-    return ig.ignores(test);
-  };
+  const isIgnored = (rel: string, isDir: boolean): boolean => matcher.ignores(rel, isDir);
 
   // Iterative DFS so huge trees don't blow the stack.
   const stack: string[] = [rootReal];
@@ -68,6 +63,11 @@ export async function walkProject(root: string, opts: WalkOptions): Promise<Walk
       continue;
     }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const dirRel = toPosix(path.relative(rootReal, dir));
+    if (dirRel && entries.some((e) => e.name === '.gitignore' && e.isFile())) {
+      const gi = await fs.readFile(path.join(dir, '.gitignore'), 'utf8').catch(() => null);
+      if (gi !== null) matcher.setGitignore(dirRel, gi);
+    }
     for (const ent of entries) {
       const abs = path.join(dir, ent.name);
       const rel = toPosix(path.relative(rootReal, abs));
@@ -134,12 +134,12 @@ export async function walkProject(root: string, opts: WalkOptions): Promise<Walk
   }
 }
 
-async function indexFile(root: string, rel: string, maxBytes: number, prev?: { h: string; s: number; m: number }): Promise<FileEntry | null> {
+async function indexFile(root: string, rel: string, maxBytes: number, prev?: { h: string; s: number; m: number; b?: 1 }): Promise<FileEntry | null> {
   const abs = path.join(root, rel);
   try {
     const st = await fs.stat(abs);
     if (prev && prev.s === st.size && prev.m === Math.floor(st.mtimeMs)) {
-      return { path: rel, size: st.size, mtimeMs: prev.m, hash: prev.h, binary: false, large: prev.h.startsWith('meta:') };
+      return { path: rel, size: st.size, mtimeMs: prev.m, hash: prev.h, binary: prev.b === 1, large: prev.h.startsWith('meta:') };
     }
     if (st.size > maxBytes) {
       return { path: rel, size: st.size, mtimeMs: Math.floor(st.mtimeMs), hash: `meta:${st.size}:${Math.floor(st.mtimeMs)}`, binary: false, large: true };
@@ -158,19 +158,6 @@ async function indexFile(root: string, rel: string, maxBytes: number, prev?: { h
   } catch {
     return null;
   }
-}
-
-async function buildIgnore(root: string, config: AthenaConfig): Promise<Ignore> {
-  const ig = ignoreFactory();
-  ig.add(DEFAULT_IGNORES.map((d) => `${d}/`));
-  try {
-    const gi = await fs.readFile(path.join(root, '.gitignore'), 'utf8');
-    ig.add(gi);
-  } catch {
-    /* no .gitignore */
-  }
-  ig.add(config.ignore);
-  return ig;
 }
 
 export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {

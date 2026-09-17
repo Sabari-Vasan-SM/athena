@@ -53,7 +53,7 @@ export function renderDebugging(m: ProjectModel): Section[] {
   const hot = m.git.hotspots;
   s.push({
     id: 'hotspots',
-    content: ['## Change Hotspots', '', hot.length ? `Directories with the most file changes in the last 180 days (git history). **INFERRED** as areas more likely to contain regressions:\n\n${table(['Path', 'File changes'], hot.map((h) => [code(h.path), String(h.commits)]))}` : '_Not available (no git history)._'].join('\n'),
+    content: ['## Change Hotspots', '', hot.length ? `Directories with the most file changes in the last 180 days (git history), most-changed first. **INFERRED** as areas more likely to contain regressions. Exact counts are omitted to keep this document stable; see \`model.json\`.\n\n${hot.slice(0, 8).map((h, i) => `${i + 1}. ${code(h.path)}`).join('\n')}` : '_Not available (no git history)._'].join('\n'),
   });
   s.push({ id: 'common-errors', content: '## Common Errors & Workarounds\n\n_None recorded._ When an agent or developer resolves a recurring error, record the symptom, cause and fix in Developer Notes.' });
   return s;
@@ -82,7 +82,7 @@ export function renderCodeReview(m: ProjectModel): Section[] {
     'No secrets, credentials or tokens added to code, config, logs or tests.',
     'New dependencies are justified and actively maintained.',
     'Breaking changes (API, schema, config) are called out explicitly.',
-    'Athena knowledge updated (`athena analyze`) if structure, routes, schema or infrastructure changed.',
+    'Athena knowledge synchronized (`athena sync`) if structure, routes, schema or infrastructure changed.',
   ];
   s.push({ id: 'general', content: ['## General Checklist', '', bullets(general.map((g) => `[ ] ${g}`))].join('\n') });
 

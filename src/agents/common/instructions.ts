@@ -12,7 +12,7 @@ export function workflowSteps(): string {
     '6. For non-trivial work, state a short implementation plan before editing.',
     '7. Implement only the required changes.',
     '8. Run the relevant validation (tests, lint, type checks — commands are listed in `.athena/project.md` and `.athena/testing.md`).',
-    '9. If you changed project structure, dependencies, routes, schema or infrastructure, tell the developer to run `athena analyze` (or run it yourself if permitted).',
+    '9. If you changed project structure, dependencies, routes, schema or infrastructure, run `athena sync --dry-run` to see which knowledge is affected, and tell the developer to review it with `athena sync` (apply it yourself only if permitted).',
   ].join('\n');
 }
 

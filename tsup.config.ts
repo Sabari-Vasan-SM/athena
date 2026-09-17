@@ -5,7 +5,8 @@ export default defineConfig({
   format: ['esm'],
   target: 'node22',
   platform: 'node',
-  clean: true,
+  // No clean: tsup overwrites cli.js itself, and cleaning would delete the Vite-built UI in dist/web.
+  clean: false,
   sourcemap: true,
   banner: { js: '#!/usr/bin/env node' },
 });

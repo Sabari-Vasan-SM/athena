@@ -1,17 +1,8 @@
-import path from 'node:path';
-import { addRule, listRules, parseRules, removeRule, serializeRules, updateRule, type RulesDocument } from '../../core/knowledge/rules.js';
-import { athenaDir } from '../../core/state/state.js';
-import { readTextIfExists, writeFileAtomic } from '../../core/util/fs.js';
+import { addRule, removeRule, updateRule, type RulesDocument } from '../../core/knowledge/rules.js';
+import { getRules, mutateRules } from '../../services/rules.js';
 import { requireProjectRoot, type GlobalOptions } from '../context.js';
-import { AthenaError } from '../errors.js';
+import { AthenaError } from '../../services/errors.js';
 import * as ui from '../ui/term.js';
-
-async function load(root: string): Promise<{ file: string; doc: RulesDocument }> {
-  const file = path.join(athenaDir(root), 'rules.md');
-  const text = await readTextIfExists(file);
-  if (text === null) throw new AthenaError('.athena/rules.md not found.', 'Run `athena analyze` to recreate it.');
-  return { file, doc: parseRules(text) };
-}
 
 function parseIndex(raw: string): number {
   const n = Number(raw);
@@ -21,22 +12,14 @@ function parseIndex(raw: string): number {
 
 async function mutate(opts: GlobalOptions, fn: (doc: RulesDocument) => RulesDocument, message: string): Promise<void> {
   const root = await requireProjectRoot(opts);
-  const { file, doc } = await load(root);
-  let next: RulesDocument;
-  try {
-    next = fn(doc);
-  } catch (err) {
-    throw new AthenaError((err as Error).message, 'Use `athena rules list` to see rule numbers.');
-  }
-  await writeFileAtomic(file, serializeRules(next));
-  if (ui.isJson()) ui.json({ ok: true, rules: listRules(next) });
+  const view = await mutateRules(root, undefined, fn);
+  if (ui.isJson()) ui.json({ ok: true, rules: view.rules });
   else ui.ok(message);
 }
 
-export async function rulesListCommand(opts: GlobalOptions & { all?: boolean }): Promise<void> {
+export async function rulesListCommand(opts: GlobalOptions): Promise<void> {
   const root = await requireProjectRoot(opts);
-  const { doc } = await load(root);
-  const rules = listRules(doc);
+  const { rules } = await getRules(root);
   if (ui.isJson()) {
     ui.json(rules);
     return;

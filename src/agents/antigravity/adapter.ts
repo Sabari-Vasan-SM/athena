@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { AgentAdapter } from '../../core/agents/adapter.js';
 import { readTextIfExists } from '../../core/util/fs.js';
 import { athenaInstructions } from '../common/instructions.js';
-import { anyExists, OWNED_HEADER, planOwned, removeOwned } from '../common/files.js';
+import { OWNED_HEADER, planOwned, removeOwned, userEvidence } from '../common/files.js';
 
 const RULE_FILE = '.agents/rules/athena.md';
 /** Antigravity documents a 12,000 character limit per rule file. */
@@ -21,7 +21,7 @@ export const antigravityAdapter: AgentAdapter = {
   capabilities: { instructionsFile: true, scopedRules: true, hooks: false, mcp: true },
   supportNote: 'Uses an Athena-owned workspace rule at .agents/rules/athena.md. Set its activation to "Always On" in Antigravity if it is not applied automatically.',
   async detectPresence(root) {
-    const evidence = await anyExists(root, ['.agents', '.agent', 'GEMINI.md']);
+    const evidence = await userEvidence(root, { files: ['GEMINI.md'], dirs: ['.agents', '.agent'], athenaOwned: [RULE_FILE] });
     return { detectedInProject: evidence.length > 0, evidence };
   },
   async plan(ctx) {

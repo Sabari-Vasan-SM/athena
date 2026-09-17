@@ -33,8 +33,14 @@ src/
 │   ├── impact/impact.ts       # changed path → affected documents
 │   └── agents/adapter.ts      # AgentAdapter interface only
 ├── agents/                    # adapters: claude-code, cursor, antigravity, agents-md
-└── cli/                       # commander CLI, pipeline, terminal UI
+├── services/                  # use cases shared by CLI and server: pipeline, status, doctor,
+│                              # knowledge (read/save/search/history), rules, agents, overview
+├── server/                    # Fastify app, security guard, event bus, static allowlist, instance lifecycle
+└── cli/                       # commander CLI, terminal UI
+web/                           # React + Vite UI, built to dist/web and served by the server
 ```
+
+Dependency direction (enforced by tests): `core` ← `agents` ← `services` ← `server` ← `cli`. The web UI talks to the server only over HTTP.
 
 ## Data flow
 
@@ -101,6 +107,44 @@ Instruction text is shared (`src/agents/common/instructions.ts`) and contains a 
 - Fresh `init` writes to `.athena.tmp-*` and renames on success, so Ctrl+C leaves nothing behind (exit 130).
 - Corrupted `state.json` is moved to `.athena/.backup/` and rebuilt.
 - Developer edits (inside and outside generated sections) survive `analyze`.
+
+## Local server (Phase 2)
+
+```mermaid
+graph LR
+  browser["Browser (React UI)"] -- "Bearer token, JSON" --> guard["Guard: Host allowlist, token, Origin, content type"]
+  guard --> api["Fastify routes"]
+  api --> services["services/*"]
+  services --> athena[".athena/*.md, rules.md"]
+  watcher["fs.watch .athena/"] --> bus["EventBus"]
+  api --> bus
+  bus -- "SSE over fetch" --> browser
+```
+
+- **Token flow:** `athena open` prints `http://127.0.0.1:<port>/#token=…`. The UI moves the token from the fragment into sessionStorage and strips it from the address bar. EventSource can't send headers, so events are streamed with `fetch`.
+- **Writes:** document saves carry the hash of the version the client loaded, and a mismatch returns 409. Rule mutations are index-based and carry the file hash. Saves that contain likely secrets are refused (422).
+- **Events:** only observed facts. `web-ui` covers edits and analyses started in the UI, `athena` covers analysis progress and results, and `filesystem` covers `.athena/*.md` changes made elsewhere. The server compares content hashes to ignore its own writes. There is no `agent` source until a real integration exists.
+
+## Synchronization (Phase 3)
+
+```mermaid
+graph LR
+  fs["File changes"] --> watch["watchProject: chokidar and IgnoreMatcher, debounce"]
+  head[".git/HEAD, refs"] --> watch
+  watch --> plan["planSync"]
+  cli["athena sync"] --> plan
+  plan --> analyze["analyzeProject: hash reuse"]
+  analyze --> diff["diffModels: previous vs next model"]
+  analyze --> render["planKnowledge: in-memory render and merge"]
+  render --> proposal["Proposal: docs that change, reasons, diffs"]
+  diff --> proposal
+  proposal -->|review| apply["applySync: conflict check, write docs, model, state"]
+```
+
+- **Pure planning:** `planSync` never writes. Each proposal carries a stable id (a hash of the file and content pairs), which the server uses to reject stale apply and ignore requests.
+- **Reason sources:** `MODEL_SECTIONS` maps model keys to the documents that render them. Adding a detector field means adding its section there, so proposals can explain themselves.
+- **Stable rendering:** rendered documents must not churn on incidental changes. Avoid exact counts or byte sizes in generated sections; keep them in `model.json` or the UI.
+- **Watcher ownership:** the watcher ignores `.athena/`, so knowledge edits don't trigger plans. The server re-plans explicitly after UI edits that could invalidate a proposal.
 
 ## Decisions
 

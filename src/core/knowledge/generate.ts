@@ -79,30 +79,58 @@ export function composeNewDocument(id: GeneratedDocId, sections: Section[]): str
   ].join('\n');
 }
 
-export async function writeKnowledge(athenaDir: string, model: ProjectModel, opts: WriteKnowledgeOptions = {}): Promise<DocWriteReport[]> {
-  const reports: DocWriteReport[] = [];
+export interface DocPlan {
+  id: GeneratedDocId;
+  file: string;
+  status: DocWriteStatus;
+  /** Current file content (null if missing). */
+  before: string | null;
+  /** Content after regeneration. Equal to `before` when unchanged. */
+  after: string;
+  blocks: string[];
+  /** Generated sections whose content would change or be added. */
+  changedBlocks: string[];
+  preservedModified: string[];
+}
+
+/** Compute regenerated documents without writing anything. */
+export async function planKnowledge(athenaDir: string, model: ProjectModel, opts: WriteKnowledgeOptions = {}): Promise<DocPlan[]> {
+  const plans: DocPlan[] = [];
   const ids = (Object.keys(RENDERERS) as GeneratedDocId[]).filter((id) => !opts.only || opts.only.includes(id));
   for (const id of ids) {
     const doc = KNOWLEDGE_DOCS.find((d) => d.id === id)!;
-    const file = path.join(athenaDir, doc.file);
     const sections = renderSections(id, model);
-    const existing = await readTextIfExists(file);
-    let text: string;
-    let status: DocWriteStatus;
-    let preserved: string[] = [];
-    if (existing === null) {
-      text = composeNewDocument(id, sections);
-      status = 'created';
-    } else {
-      const merged = mergeDocument(existing, sections, { force: opts.force, previouslyKnown: opts.previousBlocks?.[id], insertBefore: DEVELOPER_NOTES_HEADING });
-      text = merged.text;
-      status = merged.changed ? 'updated' : 'unchanged';
-      preserved = merged.preservedModified;
+    const before = await readTextIfExists(path.join(athenaDir, doc.file));
+    if (before === null) {
+      plans.push({ id, file: doc.file, status: 'created', before, after: composeNewDocument(id, sections), blocks: sections.map((s) => s.id), changedBlocks: sections.map((s) => s.id), preservedModified: [] });
+      continue;
     }
-    if (status !== 'unchanged') await writeFileAtomic(file, text);
-    reports.push({ id, file: doc.file, status, blocks: sections.map((s) => s.id), preservedModified: preserved, contentHash: sha256(text).slice(0, 16) });
+    const merged = mergeDocument(before, sections, { force: opts.force, previouslyKnown: opts.previousBlocks?.[id], insertBefore: DEVELOPER_NOTES_HEADING });
+    plans.push({
+      id,
+      file: doc.file,
+      status: merged.changed ? 'updated' : 'unchanged',
+      before,
+      after: merged.text,
+      blocks: sections.map((s) => s.id),
+      changedBlocks: [...merged.updated, ...merged.added],
+      preservedModified: merged.preservedModified,
+    });
+  }
+  return plans;
+}
+
+export async function writePlannedKnowledge(athenaDir: string, plans: DocPlan[]): Promise<DocWriteReport[]> {
+  const reports: DocWriteReport[] = [];
+  for (const p of plans) {
+    if (p.status !== 'unchanged') await writeFileAtomic(path.join(athenaDir, p.file), p.after);
+    reports.push({ id: p.id, file: p.file, status: p.status, blocks: p.blocks, preservedModified: p.preservedModified, contentHash: sha256(p.after).slice(0, 16) });
   }
   return reports;
+}
+
+export async function writeKnowledge(athenaDir: string, model: ProjectModel, opts: WriteKnowledgeOptions = {}): Promise<DocWriteReport[]> {
+  return writePlannedKnowledge(athenaDir, await planKnowledge(athenaDir, model, opts));
 }
 
 /** Create rules.md only if it does not exist. Never regenerated. */
