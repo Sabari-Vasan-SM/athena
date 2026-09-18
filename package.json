@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "athena": "./dist/cli.js"
+    "athena": "dist/cli.js"
   },
   "files": [
     "dist",
