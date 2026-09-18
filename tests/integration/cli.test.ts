@@ -191,9 +191,10 @@ describe('athena CLI', () => {
     const notInit = await runCli(['status'], dir);
     expect(notInit.code).toBe(3);
     expect(notInit.stderr).toContain('athena init');
-    const planned = await runCli(['architecture'], dir);
-    expect(planned.code).toBe(2);
-    expect(planned.stdout).toContain('Not available yet');
+    // Every documented command is implemented; none should report "not available".
+    const help = await runCli(['--help'], dir);
+    expect(help.stdout).not.toContain('planned —');
+    expect(help.stdout).not.toContain('Not available yet');
     const unknown = await runCli(['init', '--agents', 'copilotx'], dir);
     expect(unknown.code).toBe(1);
     expect(unknown.stderr).toContain('Unknown agent');

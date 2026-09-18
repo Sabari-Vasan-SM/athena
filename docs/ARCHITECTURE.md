@@ -30,8 +30,12 @@ src/
 │   ├── knowledge/             # document registry, relevance map, renderers,
 │   │                          # managed-block merge, rules.md round-trip parser
 │   ├── state/state.ts         # state.json schema, atomic writes, file index diff
-│   ├── impact/impact.ts       # changed path → affected documents
+│   ├── impact/                # changed path → affected documents; model-level diff
+│   ├── graph/graph.ts         # project graph: nodes, edges, queries
+│   ├── context/               # deterministic context selection for a task
 │   └── agents/adapter.ts      # AgentAdapter interface only
+├── ai/                        # AIProvider interface + anthropic/openai/google/ollama
+├── mcp/                       # MCP server (stdio) exposing context to agents
 ├── agents/                    # adapters: claude-code, cursor, antigravity, agents-md
 ├── services/                  # use cases shared by CLI and server: pipeline, status, doctor,
 │                              # knowledge (read/save/search/history), rules, agents, overview
@@ -166,6 +170,26 @@ graph LR
 - **No bundled vulnerability data.** `services/security.ts` defines one runner per ecosystem (command, argv, applicability, parser). Runners execute with `execFile` and fixed arguments. Availability is checked first, so "not installed" is never reported as "clean".
 - **Scan results are a sidecar** (`.athena/security-scan.json`) rendered into `security.md` by `KnowledgeExtras`, which keeps the analyzer free of network/tool dependencies while letting scan results flow through the normal sync review.
 - **Review is deterministic** (`services/review.ts`): every finding is a fact about the diff (added lines, changed paths, manifest deltas). Rules and the checklist are surfaced, never judged.
+
+## Intelligence layer (Phase 6)
+
+```mermaid
+graph LR
+  model["ProjectModel"] --> graph["Project graph"]
+  docs[".athena/*.md sections"] --> engine["Context engine"]
+  graph --> engine
+  rules["rules.md"] --> engine
+  engine --> cli["athena context"]
+  engine --> mcp["MCP: get_relevant_context"]
+  mcp --> agents["Any MCP agent"]
+  docs -. redacted, consent .-> ai["AIProvider (optional)"]
+  ai --> suggestions[".athena/ai-suggestions.md (INFERRED)"]
+```
+
+- **The graph is derived, never asserted.** Every node comes from something the analysis detected; import edges are resolved against indexed files only. It is a cache (`graph.json`, gitignored), rebuilt with `athena graph --build`.
+- **Context selection is deterministic** so it can be tested, explained and trusted: areas from keywords, expansion from the graph, section ranking, and a character budget. The reason for each document is part of the output.
+- **MCP is a thin adapter** over the same services the CLI uses, which is why it cannot drift from what `athena` itself reports. Writes are refused unless `--allow-write` is passed.
+- **AI stays at the edge.** No core path depends on a provider; enrichment sends redacted knowledge (never source), requires consent, and writes only to a separate, clearly-labelled INFERRED file.
 
 ## Decisions
 

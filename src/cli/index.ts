@@ -15,6 +15,9 @@ import { eventCommand } from './commands/event.js';
 import { activityCommand } from './commands/activity.js';
 import { securityCommand } from './commands/security.js';
 import { reviewCommand } from './commands/review.js';
+import { architectureCommand, contextCommand, graphCommand } from './commands/context.js';
+import { aiEnrichCommand, aiStatusCommand } from './commands/ai.js';
+import { mcpCommand } from './commands/mcp.js';
 import { watchCommand } from './commands/watch.js';
 import { agentsAddCommand, agentsListCommand, agentsRemoveCommand } from './commands/agents.js';
 
@@ -32,7 +35,6 @@ process.on('SIGINT', onSignal);
 process.on('SIGTERM', onSignal);
 
 const PLANNED: Array<{ name: string; description: string; phase: number }> = [
-  { name: 'architecture', description: 'Explore the project graph and architecture', phase: 6 },
 ];
 
 function globals(cmd: Command): GlobalOptions {
@@ -98,6 +100,42 @@ export function buildProgram(): Command {
     .option('--auto-apply', 'Apply updates automatically instead of proposing them')
     .option('--debounce <ms>', 'Quiet period before checking changes (default 1500)')
     .action(run(async (o: { autoApply?: boolean; debounce?: string }, cmd: Command) => watchCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+
+  program
+    .command('context <task>')
+    .description('Show which knowledge an agent should read for a task (deterministic)')
+    .option('--full', 'Print the full context an agent would receive')
+    .option('--max-chars <n>', 'Character budget for selected sections')
+    .action(run(async (task: string, o: { full?: boolean; maxChars?: string }, cmd: Command) => contextCommand(task, { ...globals(cmd), ...o, signal: controller.signal })));
+
+  program
+    .command('graph')
+    .description('Inspect the project graph (packages, files, routes, entities and their relationships)')
+    .option('--build', 'Rebuild the graph from the current code')
+    .option('--node <id>', 'Show one node and its relationships')
+    .option('--kind <kind>', 'Filter by node kind (package, file, route, entity, framework, command, infra)')
+    .option('--search <term>', 'Filter nodes by name or path')
+    .action(run(async (o: { build?: boolean; node?: string; kind?: string; search?: string }, cmd: Command) => graphCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+
+  program
+    .command('architecture')
+    .description('Summarize the project graph')
+    .action(run(async (_o: unknown, cmd: Command) => architectureCommand({ ...globals(cmd), signal: controller.signal })));
+
+  program
+    .command('mcp')
+    .description('Serve Athena project intelligence over MCP (stdio) for AI agents')
+    .option('--allow-write', 'Permit the update_knowledge tool to apply changes (read-only by default)')
+    .action(run(async (o: { allowWrite?: boolean }, cmd: Command) => mcpCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+
+  const ai = program.command('ai').description('Optional AI provider integration (never required)');
+  ai.command('status', { isDefault: true }).description('Show configured and available AI providers').action(run(async (_o: unknown, cmd: Command) => aiStatusCommand(globals(cmd))));
+  ai.command('enrich')
+    .description('Ask the configured provider for INFERRED suggestions based on your knowledge documents')
+    .option('--docs <list>', 'Documents to send (default: project,architecture,database,api)')
+    .option('--consent', 'Consent to sending redacted knowledge to a remote provider for this run')
+    .option('--dry-run', 'Show exactly what would be sent, and send nothing')
+    .action(run(async (o: { docs?: string; consent?: boolean; dryRun?: boolean }, cmd: Command) => aiEnrichCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
     .command('security')

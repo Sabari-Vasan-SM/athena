@@ -49,6 +49,17 @@ export const AthenaConfig = z.object({
   maxFiles: z.number().int().positive().default(200_000),
   /** Agent adapters to configure. Empty = auto. */
   agents: z.array(z.string()).optional(),
+  /** Optional AI provider settings (see `athena ai status`). AI is never required. */
+  ai: z
+    .object({
+      provider: z.enum(['anthropic', 'openai', 'google', 'ollama']).optional(),
+      model: z.string().optional(),
+      mode: z.enum(['cloud', 'local']).optional(),
+      consent: z.boolean().optional(),
+      maxChars: z.number().int().min(500).max(200_000).optional(),
+      baseUrl: z.string().optional(),
+    })
+    .optional(),
 });
 export type AthenaConfig = z.infer<typeof AthenaConfig>;
 

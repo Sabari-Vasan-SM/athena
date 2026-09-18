@@ -86,3 +86,21 @@ export function hookScript(agent: string, platform: NodeJS.Platform = process.pl
     mode: 0o755,
   };
 }
+
+/** Shared shape for MCP server registration (Claude Code's .mcp.json and Cursor's .cursor/mcp.json). */
+export function athenaMcpEntry(): Record<string, unknown> {
+  return { command: hookCommand(), args: ['mcp'] };
+}
+
+export function mergeMcpServers(data: Record<string, unknown>): void {
+  const servers = (data.mcpServers && typeof data.mcpServers === 'object' && !Array.isArray(data.mcpServers) ? data.mcpServers : {}) as Record<string, unknown>;
+  servers.athena = athenaMcpEntry();
+  data.mcpServers = servers;
+}
+
+export function stripMcpServers(data: Record<string, unknown>): void {
+  const servers = data.mcpServers as Record<string, unknown> | undefined;
+  if (!servers) return;
+  delete servers.athena;
+  pruneEmpty(data, 'mcpServers');
+}

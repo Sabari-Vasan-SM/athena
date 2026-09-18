@@ -4,9 +4,10 @@ import { readTextIfExists } from '../../core/util/fs.js';
 import { athenaInstructions } from '../common/instructions.js';
 import { checkBlock, planBlock, removeBlockFrom, userEvidence } from '../common/files.js';
 import { CLAUDE_HOOK_EVENTS } from '../common/hook-events.js';
-import { hookArgs, hookCommand, isAthenaEntry, planJsonChange, pruneEmpty, removeJsonHooks } from '../common/hooks.js';
+import { hookArgs, hookCommand, isAthenaEntry, mergeMcpServers, planJsonChange, pruneEmpty, removeJsonHooks, stripMcpServers } from '../common/hooks.js';
 
 const SETTINGS = '.claude/settings.json';
+const MCP_FILE = '.mcp.json';
 
 interface HookEntry {
   matcher?: string;
@@ -25,9 +26,9 @@ export const claudeCodeAdapter: AgentAdapter = {
   id: 'claude-code',
   displayName: 'Claude Code',
   capabilities: { instructionsFile: true, scopedRules: false, hooks: true, mcp: true },
-  supportNote: 'Uses CLAUDE.md with an @-import of .athena/rules.md, plus hooks in .claude/settings.json that report activity to Athena.',
+  supportNote: 'Uses CLAUDE.md with an @-import of .athena/rules.md, hooks in .claude/settings.json that report activity, and an MCP server entry in .mcp.json.',
   async detectPresence(root) {
-    const evidence = await userEvidence(root, { files: ['CLAUDE.md', 'CLAUDE.local.md', '.mcp.json'], dirs: ['.claude'], athenaOwnedJson: [SETTINGS] });
+    const evidence = await userEvidence(root, { files: ['CLAUDE.md', 'CLAUDE.local.md'], dirs: ['.claude'], athenaOwnedJson: [SETTINGS, MCP_FILE] });
     return { detectedInProject: evidence.length > 0, evidence };
   },
   async plan(ctx) {
@@ -46,11 +47,13 @@ export const claudeCodeAdapter: AgentAdapter = {
         data.hooks = hooks;
       }),
     );
+    changes.push(await planJsonChange(ctx.root, MCP_FILE, mergeMcpServers));
     return changes;
   },
   async remove(root) {
     const touched: string[] = [];
     if (await removeBlockFrom(root, 'CLAUDE.md')) touched.push('CLAUDE.md');
+    if (await removeJsonHooks(root, MCP_FILE, stripMcpServers, (d) => Object.keys(d).length === 0)) touched.push(MCP_FILE);
     const removed = await removeJsonHooks(
       root,
       SETTINGS,

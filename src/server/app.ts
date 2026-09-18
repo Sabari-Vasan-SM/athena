@@ -15,6 +15,8 @@ import { runPipeline } from '../services/pipeline.js';
 import { applySync, ignorePlan, planSync, type SyncPlan } from '../services/sync.js';
 import { loadScan, runSecurityScan, saveScan, type SecurityScan } from '../services/security.js';
 import { reviewChanges } from '../services/review.js';
+import { getRelevantContext, graphSummary, refreshGraph } from '../services/context.js';
+import { aiStatus } from '../services/ai.js';
 import { ProjectModel } from '../core/model/project-model.js';
 import { watchProject, type ProjectWatcher } from '../services/watch.js';
 import { ACTIVITY_FILE, activityFile, parseEventLines, readRecentEvents, summarizeSessions } from '../services/agent-activity.js';
@@ -411,6 +413,31 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     const base = typeof req.query.base === 'string' && req.query.base ? req.query.base : undefined;
     return reviewChanges(root, { base, checkSync: async (r) => (await planSync(r)).upToDate });
   });
+
+  // ---- context engine & graph -------------------------------------------------------------
+  let graphBuilding = false;
+
+  app.get<{ Querystring: { task?: string; maxChars?: string } }>('/api/context', async (req) => {
+    const task = String(req.query.task ?? '').slice(0, 500);
+    const maxChars = req.query.maxChars ? Number(req.query.maxChars) : undefined;
+    return getRelevantContext(root, task, { maxChars: Number.isFinite(maxChars) ? maxChars : undefined });
+  });
+
+  app.get('/api/graph', async () => ({ ...(await graphSummary(root)), building: graphBuilding }));
+
+  app.post('/api/graph/build', async () => {
+    if (graphBuilding) throw new AthenaError('The graph is already being built.', undefined, 1, 'busy');
+    graphBuilding = true;
+    try {
+      const graph = await refreshGraph(root);
+      events.emit({ source: 'web-ui', type: 'graph.built', level: 'success', message: `Project graph built: ${graph.stats.nodes} nodes, ${graph.stats.edges} relationships` });
+      return { built: true, builtAt: graph.builtAt, stats: graph.stats };
+    } finally {
+      graphBuilding = false;
+    }
+  });
+
+  app.get('/api/ai', async () => aiStatus(root));
 
   // ---- events (streamed) ------------------------------------------------------------------
   app.get('/api/activity', async () => {

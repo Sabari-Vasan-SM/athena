@@ -61,12 +61,16 @@ Generated content sits between `athena:generated` markers. Anything outside the 
 | `athena activity` | Show AI agent activity observed through hooks (`-n`, `--agent`) |
 | `athena security` | Audit dependencies with the tools installed for this project, and report secret findings (`--fail-on`, `--last`, `--no-audit`) |
 | `athena review` | Check the current diff for facts worth reviewing, and list your rules and checklist (`--base`, `--no-fail`) |
+| `athena context <task>` | Show which knowledge an agent should read for a task (`--full`, `--json`) |
+| `athena graph` | Inspect the project graph (`--build`, `--search`, `--node`, `--kind`) |
+| `athena mcp` | Serve project intelligence to agents over MCP (stdio; `--allow-write`) |
+| `athena ai` | `status`, `enrich` — optional AI suggestions (`--consent`, `--dry-run`) |
 | `athena open` | Start (or reuse) the local web UI on `127.0.0.1`, watch for changes, and open it (`--port`, `--no-open`, `--no-watch`) |
 | `athena clean` | Remove `.athena/` and Athena integration blocks |
 
 Global flags: `--json`, `--quiet`, `--cwd <dir>`, `--no-color`.
 
-`architecture` is reserved for a later phase. They print *Not available yet* and exit with code 2. See [docs/ROADMAP.md](docs/ROADMAP.md).
+ They print *Not available yet* and exit with code 2. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Keeping knowledge in sync
 
@@ -132,6 +136,43 @@ athena review                     # check the current diff before you commit
 
 **`athena review`** checks facts about your current diff: secrets in added lines (a blocker, exit 1), committed env files, new dependencies, source changed without tests, API/schema/auth touchpoints, large files, debug leftovers, and whether Athena knowledge is stale. It then lists your enabled rules and the project's review checklist for you or your agent to apply — Athena does not claim to judge whether they are met, and it runs no AI.
 
+## Context engine, graph and MCP
+
+Reading twelve documents for every task wastes an agent's context. Athena picks what matters:
+
+```text
+$ athena context "add refunds to the payments API"
+
+Documents to read
+• api — task mentions "API"
+• database — task mentions "payments" via entity Payment
+• security — security implications of data/API changes
+• testing — tests for changed behavior
+```
+
+- **Deterministic.** The same task and project state always produce the same selection, with a stated reason for each document. No AI is involved.
+- **Sections, not whole files.** Only the relevant sections are returned, under a character budget, with your rules always included.
+- **Project graph.** `athena graph --build` writes `.athena/graph.json`: packages, files, routes, entities, frameworks and commands, connected by `contains`, `imports`, `handles`, `defines` and `depends_on`. It comes from the analysis, so it never asserts more than DETECTED evidence.
+
+**MCP.** `athena mcp` serves this to any MCP-capable agent over stdio, and `athena agents add` registers it (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor). Tools: `get_relevant_context`, `get_project_context`, `get_architecture`, `get_database_schema`, `get_api_context`, `get_security_context`, `get_project_rules`, `get_knowledge_document`, `get_project_changes`, `get_project_graph`, `get_athena_status`, `update_knowledge`.
+
+The server is **read-only by default**: `update_knowledge` reports what would change and refuses to write unless you start it with `--allow-write`.
+
+## Optional AI
+
+Athena needs no AI: analysis, sync, context and MCP are all deterministic. AI is opt-in for suggestions only.
+
+```bash
+athena ai status                  # which providers are configured and reachable
+athena ai enrich --dry-run        # show exactly what would be sent
+athena ai enrich --consent        # ask for suggestions
+```
+
+- **Providers:** Anthropic, OpenAI, Google, and Ollama for a fully local setup. Configure in `.athena/config.json` under `"ai"`; API keys come from environment variables only and are never written to disk by Athena.
+- **Consent first.** Nothing leaves your machine without `--consent` (or `"consent": true`). `--dry-run` prints the provider, endpoint, documents and exact size first.
+- **Knowledge only, redacted.** Athena sends your `.athena` documents — never source code — after the secret redactor, and refuses to send anything that still looks like a secret.
+- **Output is INFERRED.** Suggestions land in `.athena/ai-suggestions.md` (gitignored), clearly labeled and attributed to the model. Nothing is added to your knowledge base automatically.
+
 ## Web UI
 
 ```bash
@@ -156,6 +197,7 @@ The local web UI lets you:
 - configure or remove agent integrations
 - follow an activity timeline of what Athena actually observed: agent tool use (via hooks), analyses, UI edits, and knowledge files changed on disk
 - run dependency audits from the **Security** page and review findings by severity
+- explore the **Context** page: type a task and see which knowledge an agent would read, and why
 
 The robot indicator reflects real work: Athena's own analyses, and — for agents with hooks installed — the agent's current tool use (reading, coding, testing). With no hook events it stays idle and says so, rather than simulating activity.
 

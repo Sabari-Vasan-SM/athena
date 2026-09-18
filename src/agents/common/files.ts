@@ -102,13 +102,23 @@ async function hasNonAthenaEntries(dir: string, root: string, owned: Set<string>
 /** True when a JSON config has no content beyond Athena's marked hook entries. */
 export async function jsonOnlyAthena(file: string): Promise<boolean> {
   const text = await readTextIfExists(file).catch(() => null);
-  if (text === null || !text.includes(ATHENA_MARK)) return false;
+  if (text === null) return false;
   let data: unknown;
   try {
     data = JSON.parse(text);
   } catch {
     return false;
   }
+  // Athena's MCP registration is keyed by name rather than carrying the hook marker.
+  const record = data as Record<string, unknown>;
+  const servers = record?.mcpServers;
+  let hadAthenaMcp = false;
+  if (servers && typeof servers === 'object') {
+    hadAthenaMcp = 'athena' in (servers as Record<string, unknown>);
+    delete (servers as Record<string, unknown>).athena;
+    if (Object.keys(servers as Record<string, unknown>).length === 0) delete record.mcpServers;
+  }
+  if (!text.includes(ATHENA_MARK) && !hadAthenaMcp) return false;
   const strip = (value: unknown): unknown => {
     if (Array.isArray(value)) {
       const kept = value.filter((v) => !JSON.stringify(v ?? '').includes(ATHENA_MARK)).map(strip);

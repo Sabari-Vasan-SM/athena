@@ -203,3 +203,37 @@ export interface SecurityState {
   scan: SecurityScan | null;
   running: boolean;
 }
+
+export interface GraphSummary {
+  built: boolean;
+  builtAt: string | null;
+  stats: { nodes: number; edges: number; byKind: Record<string, number> } | null;
+  building?: boolean;
+}
+
+export interface RelevantContext {
+  task: string;
+  areas: Array<{ id: DocId; score: number; why: string[] }>;
+  sections: Array<{ doc: DocId; file: string; section: string; content: string; score: number }>;
+  rules: Rule[];
+  graphNodes: Array<{ id: string; kind: string; name: string; path?: string }>;
+  mentionedFiles: string[];
+  truncated: boolean;
+  approxChars: number;
+}
+
+export interface AiProviderStatus {
+  id: string;
+  name: string;
+  remote: boolean;
+  defaultModel: string;
+  keyEnvVar?: string;
+  availability: { ok: boolean; reason?: string; endpoint: string };
+  selected: boolean;
+}
+
+export interface AiStatus {
+  configured: { provider: string; model?: string; mode: string; consent: boolean };
+  providers: AiProviderStatus[];
+  consent: boolean;
+}

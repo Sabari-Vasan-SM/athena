@@ -13,6 +13,7 @@ import { AgentsPage } from './pages/AgentsPage';
 import { ActivityPage } from './pages/ActivityPage';
 import { SyncPage } from './pages/SyncPage';
 import { SecurityPage } from './pages/SecurityPage';
+import { ContextPage } from './pages/ContextPage';
 
 const DOC_IDS = new Set<DocId>(['project', 'architecture', 'database', 'api', 'auth', 'security', 'testing', 'debugging', 'performance', 'code-review', 'deployment', 'rules']);
 
@@ -32,6 +33,7 @@ function Page({ path }: { path: string }) {
   if (path === '/rules') return <RulesPage />;
   if (path === '/sync') return <SyncPage />;
   if (path === '/security') return <SecurityPage />;
+  if (path === '/context') return <ContextPage />;
   if (path === '/agents') return <AgentsPage />;
   if (path === '/activity') return <ActivityPage />;
   return (

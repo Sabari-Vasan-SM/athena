@@ -574,3 +574,11 @@ button { font: inherit; color: inherit; }
   .proposed__sections, .reasons { margin-left: 0; }
   .nav__item .count { display: inline-grid; }
 }
+
+/* ---------- context ---------- */
+.examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip--button { cursor: pointer; border-color: var(--border-strong); color: var(--muted); }
+.chip--button:hover { background: var(--hover); color: var(--text); }
+.context-sections { display: flex; flex-direction: column; gap: 8px; }
+.context-section__head { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.context-section__body { margin: 6px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; white-space: pre-wrap; overflow-x: auto; max-height: 320px; color: var(--muted); }

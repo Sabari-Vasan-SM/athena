@@ -5,11 +5,12 @@ import { readTextIfExists } from '../../core/util/fs.js';
 import { athenaInstructions } from '../common/instructions.js';
 import { OWNED_HEADER, planOwned, removeOwned, userEvidence } from '../common/files.js';
 import { CURSOR_HOOK_EVENTS } from '../common/hook-events.js';
-import { isAthenaEntry, hookScript, planJsonChange, pruneEmpty, removeJsonHooks } from '../common/hooks.js';
+import { isAthenaEntry, hookScript, mergeMcpServers, planJsonChange, pruneEmpty, removeJsonHooks, stripMcpServers } from '../common/hooks.js';
 
 const RULE_FILE = '.cursor/rules/athena.mdc';
 const HOOKS_FILE = '.cursor/hooks.json';
 const HOOK_DIR = '.cursor/hooks';
+const MCP_FILE = '.cursor/mcp.json';
 
 /**
  * Cursor:
@@ -22,9 +23,9 @@ export const cursorAdapter: AgentAdapter = {
   id: 'cursor',
   displayName: 'Cursor',
   capabilities: { instructionsFile: true, scopedRules: true, hooks: true, mcp: true },
-  supportNote: 'Uses an Athena-owned project rule at .cursor/rules/athena.mdc, plus hooks in .cursor/hooks.json that report activity to Athena.',
+  supportNote: 'Uses an Athena-owned project rule at .cursor/rules/athena.mdc, hooks in .cursor/hooks.json that report activity, and an MCP server entry in .cursor/mcp.json.',
   async detectPresence(root) {
-    const evidence = await userEvidence(root, { files: ['.cursorrules'], dirs: ['.cursor'], athenaOwned: [RULE_FILE, `${HOOK_DIR}/athena-hook.sh`, `${HOOK_DIR}/athena-hook.cmd`], athenaOwnedJson: [HOOKS_FILE] });
+    const evidence = await userEvidence(root, { files: ['.cursorrules'], dirs: ['.cursor'], athenaOwned: [RULE_FILE, `${HOOK_DIR}/athena-hook.sh`, `${HOOK_DIR}/athena-hook.cmd`], athenaOwnedJson: [HOOKS_FILE, MCP_FILE] });
     return { detectedInProject: evidence.length > 0, evidence };
   },
   async plan(ctx) {
@@ -46,11 +47,13 @@ export const cursorAdapter: AgentAdapter = {
         data.hooks = hooks;
       }),
     );
+    changes.push(await planJsonChange(ctx.root, MCP_FILE, mergeMcpServers));
     return changes;
   },
   async remove(root) {
     const touched: string[] = [];
     if (await removeOwned(root, RULE_FILE)) touched.push(RULE_FILE);
+    if (await removeJsonHooks(root, MCP_FILE, stripMcpServers, (d) => Object.keys(d).length === 0)) touched.push(MCP_FILE);
     for (const f of ['athena-hook.sh', 'athena-hook.cmd']) {
       if (await removeOwned(root, `${HOOK_DIR}/${f}`)) touched.push(`${HOOK_DIR}/${f}`);
     }

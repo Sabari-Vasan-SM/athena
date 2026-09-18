@@ -39,6 +39,7 @@ const Icon = {
   rules: <svg viewBox="0 0 16 16"><path d="M3 3.5h10M3 8h10M3 12.5h6" /></svg>,
   agents: <svg viewBox="0 0 16 16"><rect x="3" y="4.5" width="10" height="8" rx="2.5" /><path d="M8 4.5V2M6 8.5h.01M10 8.5h.01" /></svg>,
   activity: <svg viewBox="0 0 16 16"><path d="M1.5 8.5h3l2-5 3 9 2-4h3" /></svg>,
+  context: <svg viewBox="0 0 16 16"><circle cx="4" cy="4" r="2" /><circle cx="12" cy="6" r="2" /><circle cx="7" cy="12" r="2" /><path d="M5.7 5.3 10.3 5M5.2 5.9 6.3 10M10.9 7.8 8.4 10.7" /></svg>,
   shield: <svg viewBox="0 0 16 16"><path d="M8 1.5 13 3.5v4c0 3.2-2.1 6.1-5 7-2.9-.9-5-3.8-5-7v-4z" /></svg>,
   sync: <svg viewBox="0 0 16 16"><path d="M13 6.5A5 5 0 0 0 4 4.5L2.5 6M3 9.5a5 5 0 0 0 9 2l1.5-1.5M2.5 2.5V6H6M13.5 13.5V10H10" /></svg>,
 };
@@ -68,6 +69,7 @@ export function Sidebar() {
       </div>
       <div className="nav__heading">Tools</div>
       <div className="nav__group">
+        <NavItem to="/context" label="Context" icon={Icon.context} />
         <NavItem to="/security" label="Security scan" icon={Icon.shield} />
         <NavItem to="/agents" label="AI Agents" icon={Icon.agents} />
         <NavItem to="/activity" label="Activity" icon={Icon.activity} />

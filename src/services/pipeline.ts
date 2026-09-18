@@ -5,7 +5,7 @@ import { analyzeProject, type AnalysisResult } from '../core/analyzer/analyze.js
 import { ATHENA_DIR } from '../core/config.js';
 import { ensureRules, writeKnowledge, type DocWriteReport } from '../core/knowledge/generate.js';
 import { athenaDir, backupCorruptedState, buildFileIndex, readState, writeState, type AthenaState } from '../core/state/state.js';
-import { exists, sha256, writeFileAtomic } from '../core/util/fs.js';
+import { exists, readTextIfExists, sha256, writeFileAtomic } from '../core/util/fs.js';
 import type { FileEntry } from '../core/fs/walker.js';
 import type { AgentAdapter, PlannedFileChange } from '../core/agents/adapter.js';
 import { ADAPTERS, applyChanges } from '../agents/registry.js';
@@ -35,11 +35,30 @@ const ATHENA_GITIGNORE = [
   '# Commit the *.md knowledge files so your team and Git history share them.',
   'state.json',
   'model.json',
+  'graph.json',
+  'security-scan.json',
+  'ai-suggestions.md',
   '.backup/',
   '.server.json',
   '.sync-ignore.json',
+  '.agent-events.jsonl',
   '',
 ].join('\n');
+
+/** Entries every .athena/.gitignore should carry; older projects are topped up in place. */
+const GITIGNORE_ENTRIES = ['state.json', 'model.json', 'graph.json', 'security-scan.json', 'ai-suggestions.md', '.backup/', '.server.json', '.sync-ignore.json', '.agent-events.jsonl'];
+
+async function ensureGitignoreEntries(file: string): Promise<void> {
+  const existing = await readTextIfExists(file);
+  if (existing === null) {
+    await writeFileAtomic(file, ATHENA_GITIGNORE);
+    return;
+  }
+  const lines = existing.split(/\r?\n/);
+  const missing = GITIGNORE_ENTRIES.filter((e) => !lines.includes(e));
+  if (!missing.length) return;
+  await writeFileAtomic(file, `${existing.replace(/\s*$/, '')}\n${missing.join('\n')}\n`);
+}
 
 /** Include files Athena itself just wrote (agent integrations) so they don't show up as external changes. */
 export async function indexWithIntegrations(root: string, files: FileEntry[], written: string[]): Promise<AthenaState['fileIndex']> {
@@ -134,7 +153,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     docs = await writeKnowledge(workDir, analysis.model, { force: opts.force, previousBlocks });
     docs.push(await ensureRules(workDir, analysis.model));
     await writeFileAtomic(path.join(workDir, 'model.json'), `${JSON.stringify(analysis.model, null, 2)}\n`);
-    if (!(await exists(path.join(workDir, '.gitignore')))) await writeFileAtomic(path.join(workDir, '.gitignore'), ATHENA_GITIGNORE);
+    await ensureGitignoreEntries(path.join(workDir, '.gitignore'));
     opts.signal?.throwIfAborted();
     if (fresh) await fs.rename(workDir, finalDir);
   } catch (err) {

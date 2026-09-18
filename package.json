@@ -37,6 +37,7 @@
   ],
   "dependencies": {
     "@babel/parser": "^8.0.5",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "chokidar": "^5.0.0",
     "commander": "^15.0.0",
     "diff": "^9.0.0",

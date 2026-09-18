@@ -91,9 +91,20 @@ Status legend: ✅ done · 🔜 next · 📋 planned
 - Review is deterministic and syntactic: it reads paths and added lines, not semantics. It cannot tell whether a rule was actually followed.
 - No SAST, no license checks, and no automatic fixes.
 
-## Phase 6: Intelligence 📋
+## Phase 6: Intelligence ✅
 
-- `AIProvider` abstraction (Anthropic, OpenAI, Google, Ollama) with Cloud / Local / Hybrid modes. Keys go in the OS keychain; explicit consent is required and redaction always runs first.
-- Project graph (files, modules, routes, entities, dependencies) using web-tree-sitter
-- Context engine: `get_relevant_context(task)`
-- MCP server (`athena mcp`, stdio) exposing project context tools
+- ✅ **Project graph** (`core/graph/graph.ts`, `.athena/graph.json`): packages, files, routes, entities, frameworks, commands and infrastructure, connected by `contains`, `imports`, `handles`, `defines`, `depends_on` and `runs`. Import edges are resolved for TS/JS and Python; imported files are added to the graph, so it reaches beyond files the model referenced directly. Queries: `neighbors`, `expandFromFiles`.
+- ✅ **Context engine** (`core/context/context-engine.ts`): keyword → area mapping, graph expansion from files named in the task, section-level ranking under a character budget, rules always included, and a stated reason per document. Fully deterministic.
+- ✅ **MCP server** (`athena mcp`, official SDK, stdio) with 12 tools; read-only by default, `--allow-write` required for `update_knowledge` to apply. Registered with agents via `.mcp.json` / `.cursor/mcp.json`.
+- ✅ **AI providers** (`ai/providers.ts`): Anthropic, OpenAI, Google and Ollama behind one `AIProvider` interface, with availability checks; keys from environment variables only.
+- ✅ **AI enrichment** (`athena ai enrich`): consent-gated, knowledge-only (never source), redacted twice, output written to `.athena/ai-suggestions.md` labeled INFERRED and attributed to provider/model. Never modifies knowledge documents.
+- ✅ **CLI**: `athena context`, `athena graph`, `athena architecture`, `athena mcp`, `athena ai`. Every previously reserved command is now implemented.
+- ✅ **Web UI**: Context page (task → selected documents with reasons, related graph nodes, sections and content), graph build/rebuild.
+- ✅ Tests: graph construction and queries, context selection/determinism/budget, MCP tool surface and read-only enforcement over a real client transport, AI availability/consent/redaction/error handling with a stubbed provider.
+
+**Known Phase 6 limitations**
+- The graph is built from analysis output plus import parsing; it has no call graph, type information or cross-language resolution, and TS path aliases are not resolved.
+- Context selection is keyword- and graph-based. It has no semantic understanding, so unusual vocabulary can miss an area (rules are always included as a floor).
+- `athena ai enrich` is the only AI feature, and its output is never applied automatically. Providers are called over plain HTTP APIs with no streaming or retries, and token costs are not estimated.
+- API keys are read from environment variables; OS keychain storage is not implemented.
+- MCP exposes stdio only (no HTTP transport), and one project per server process.
