@@ -32,4 +32,4 @@ Add an entry to `src/core/analyzer/catalog.ts`, with `markers` for config files 
 
 ## Adding an agent adapter
 
-Implement `AgentAdapter` in `src/agents/<agent>/` using the agent's **documented** instruction mechanism. Cite the documentation in a comment. Register it in `src/agents/registry.ts`, and add doctor checks and an end-to-end test.
+Implement `AgentAdapter` in `src/agents/<agent>/` using the agent's **documented** instruction and hook mechanisms. Cite the documentation (with the date you checked it) in a comment. Hook entries must be marked with `--athena-hook`, merged into the agent's config without disturbing user entries, and removable. Register it in `src/agents/registry.ts`, and add doctor checks and an end-to-end test.

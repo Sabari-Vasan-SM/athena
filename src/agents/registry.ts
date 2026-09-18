@@ -36,6 +36,7 @@ export async function applyChanges(root: string, changes: PlannedFileChange[]): 
     if (st?.isSymbolicLink()) throw new Error(`Refusing to write through symlink: ${c.path}`);
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await writeFileAtomic(abs, c.content);
+    if (abs.endsWith('.sh')) await fs.chmod(abs, 0o755).catch(() => {});
     applied.push(c);
   }
   return applied;

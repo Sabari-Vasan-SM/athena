@@ -12,8 +12,14 @@ import { renderSecurity } from './renderers/security.js';
 import { renderCodeReview, renderDebugging, renderPerformance, renderTesting } from './renderers/quality.js';
 import { renderDeployment } from './renderers/deployment.js';
 import { seedRules } from './rules-seed.js';
+import { loadScanFromDir, type SecurityScan } from '../model/security-scan.js';
 
-export const RENDERERS: Record<GeneratedDocId, (m: ProjectModel) => Section[]> = {
+export interface KnowledgeExtras {
+  /** Latest dependency/secret scan, when one has been run. */
+  securityScan?: SecurityScan | null;
+}
+
+export const RENDERERS: Record<GeneratedDocId, (m: ProjectModel, extras: KnowledgeExtras) => Section[]> = {
   project: renderProject,
   architecture: renderArchitecture,
   database: renderDatabase,
@@ -49,7 +55,7 @@ export interface WriteKnowledgeOptions {
   only?: GeneratedDocId[];
 }
 
-export function renderSections(id: GeneratedDocId, model: ProjectModel): Section[] {
+export function renderSections(id: GeneratedDocId, model: ProjectModel, extras: KnowledgeExtras = {}): Section[] {
   const doc = KNOWLEDGE_DOCS.find((d) => d.id === id)!;
   const about: Section = {
     id: 'about',
@@ -62,7 +68,7 @@ export function renderSections(id: GeneratedDocId, model: ProjectModel): Section
     ].join('\n'),
   };
   // Redact generated content only — developer-authored text is never rewritten.
-  return [about, ...RENDERERS[id](model)].map((s) => ({ id: s.id, content: redact(s.content) }));
+  return [about, ...RENDERERS[id](model, extras)].map((s) => ({ id: s.id, content: redact(s.content) }));
 }
 
 export function composeNewDocument(id: GeneratedDocId, sections: Section[]): string {
@@ -96,10 +102,12 @@ export interface DocPlan {
 /** Compute regenerated documents without writing anything. */
 export async function planKnowledge(athenaDir: string, model: ProjectModel, opts: WriteKnowledgeOptions = {}): Promise<DocPlan[]> {
   const plans: DocPlan[] = [];
+  // Security scan results live beside the knowledge files and are rendered into security.md.
+  const extras: KnowledgeExtras = { securityScan: await loadScanFromDir(athenaDir) };
   const ids = (Object.keys(RENDERERS) as GeneratedDocId[]).filter((id) => !opts.only || opts.only.includes(id));
   for (const id of ids) {
     const doc = KNOWLEDGE_DOCS.find((d) => d.id === id)!;
-    const sections = renderSections(id, model);
+    const sections = renderSections(id, model, extras);
     const before = await readTextIfExists(path.join(athenaDir, doc.file));
     if (before === null) {
       plans.push({ id, file: doc.file, status: 'created', before, after: composeNewDocument(id, sections), blocks: sections.map((s) => s.id), changedBlocks: sections.map((s) => s.id), preservedModified: [] });

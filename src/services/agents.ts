@@ -2,6 +2,7 @@ import { ADAPTERS, applyChanges, resolveAdapters } from '../agents/registry.js';
 import type { IntegrationCheck } from '../core/agents/adapter.js';
 import { athenaDir, readState, writeState } from '../core/state/state.js';
 import { AthenaError } from './errors.js';
+import { readRecentEvents, summarizeSessions } from './agent-activity.js';
 
 function resolve(names: string[]) {
   try {
@@ -22,16 +23,23 @@ export interface AgentView {
   note: string;
   capabilities: { instructionsFile: boolean; scopedRules: boolean; hooks: boolean; mcp: boolean };
   checks: IntegrationCheck[];
-  /** Athena cannot observe agent activity until hook integrations ship. */
-  activityObservation: 'not-available';
+  /** 'hooks': the agent reports activity to Athena. 'unsupported': no documented hook mechanism. */
+  activityObservation: 'hooks' | 'not-configured' | 'unsupported';
+  /** Last time Athena observed a hook event from this agent (null = never). */
+  lastActivityAt: string | null;
+  observedEvents: number;
 }
 
 export async function listAgents(root: string): Promise<AgentView[]> {
   const st = await readState(athenaDir(root));
+  const sessions = summarizeSessions(await readRecentEvents(root, 500));
   const out: AgentView[] = [];
   for (const a of ADAPTERS) {
     const presence = await a.detectPresence(root);
     const s = st.kind === 'ok' ? st.state.agents[a.id] : undefined;
+    const checks = s?.configured ? await a.check(root) : [];
+    const hooksInstalled = a.capabilities.hooks && checks.some((c) => c.ok && /hooks installed/i.test(c.message));
+    const mine = sessions.filter((x) => x.agent === a.id);
     out.push({
       id: a.id,
       name: a.displayName,
@@ -42,8 +50,10 @@ export async function listAgents(root: string): Promise<AgentView[]> {
       evidence: presence.evidence,
       note: a.supportNote,
       capabilities: a.capabilities,
-      checks: s?.configured ? await a.check(root) : [],
-      activityObservation: 'not-available',
+      checks,
+      activityObservation: !a.capabilities.hooks ? 'unsupported' : hooksInstalled ? 'hooks' : 'not-configured',
+      lastActivityAt: mine[0]?.lastEventAt ?? null,
+      observedEvents: mine.reduce((n, x) => n + x.events, 0),
     });
   }
   return out;

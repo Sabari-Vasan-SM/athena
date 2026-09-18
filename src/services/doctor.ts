@@ -12,6 +12,9 @@ import { relativeTime } from './time.js';
 import { ADAPTERS } from '../agents/registry.js';
 import { ATHENA_VERSION } from './version.js';
 import { findRunningInstance } from './instance.js';
+import { whichExecutable } from './which.js';
+import { hookCommand } from '../agents/common/hooks.js';
+import { readRecentEvents } from './agent-activity.js';
 
 export interface Check {
   area: string;
@@ -84,6 +87,20 @@ export async function runDoctor(cwd: string): Promise<{ checks: Check[]; root: s
       continue;
     }
     for (const c of await a.check(root)) add({ area: a.displayName, level: c.level, message: c.message.replace(/^[^:]+:\s*/, '') });
+  }
+
+  // Hooks invoke the `athena` executable, so it must be resolvable from the agent's environment.
+  const hooksConfigured = ADAPTERS.some((a) => a.capabilities.hooks && stateAgents[a.id]?.configured);
+  if (hooksConfigured) {
+    const cmd = hookCommand();
+    const resolved = await whichExecutable(cmd);
+    add(
+      resolved
+        ? { area: 'Agent hooks', level: 'ok', message: `\`${cmd}\` resolves to ${resolved}` }
+        : { area: 'Agent hooks', level: 'warn', message: `\`${cmd}\` is not on PATH — agent hooks cannot report activity`, hint: 'Install globally (`npm i -g athena-cli`) or set ATHENA_HOOK_COMMAND to an absolute path and re-run `athena agents add`.' },
+    );
+    const events = await readRecentEvents(root, 1);
+    add({ area: 'Agent hooks', level: 'info', message: events.length ? `Last agent event: ${relativeTime(events[0]!.ts)}` : 'No agent activity recorded yet (hooks fire when an agent runs)' });
   }
 
   const running = await findRunningInstance(root);

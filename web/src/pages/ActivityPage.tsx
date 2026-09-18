@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import { useLive } from '../lib/store';
-import type { AthenaEvent } from '../lib/types';
+import { useApi, useLive } from '../lib/store';
+import { timeAgo } from '../lib/router';
+import type { ActivityResponse, AthenaEvent } from '../lib/types';
 import { ActivityPanel, EventList } from '../components/ActivityPanel';
 import { Card } from '../components/ui';
 
@@ -13,7 +14,10 @@ const FILTERS: Array<{ id: 'all' | AthenaEvent['source']; label: string }> = [
 ];
 
 export function ActivityPage() {
-  const { events, connected } = useLive();
+  const { events, connected, revision } = useLive();
+  const { data } = useApi<ActivityResponse>('/api/activity', [revision, events.length]);
+  const observation = data?.agentObservation;
+  const sessions = data?.sessions ?? [];
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['id']>('all');
   const shown = useMemo(() => (filter === 'all' ? events : events.filter((e) => e.source === filter)), [events, filter]);
 
@@ -36,11 +40,28 @@ export function ActivityPage() {
         </Card>
         <Card title="What Athena can observe">
           <ul className="observe">
-            <li className="observe--yes">Analyses started from the web UI, with results</li>
-            <li className="observe--yes">Knowledge and rules edits made in this UI</li>
-            <li className="observe--yes">Changes to <span className="mono">.athena/*.md</span> made elsewhere (CLI, editors, agents)</li>
-            <li className="observe--no">AI agent reasoning, plans, file reads or test runs — <em>not available until agent hook integrations (Phase 4)</em></li>
+            <li className="observe--yes">Analyses and knowledge updates (started here or by the CLI)</li>
+            <li className="observe--yes">Changes to <span className="mono">.athena/*.md</span> made elsewhere</li>
+            <li className={observation?.available ? 'observe--yes' : 'observe--no'}>
+              AI agent tool use via hooks{observation?.available ? `: ${observation.agents.join(', ')}` : ' — no agent is reporting yet'}
+            </li>
+            <li className="observe--no">Agent reasoning or plans — hooks report which tool ran, never why</li>
           </ul>
+          {observation && <p className="fineprint">{observation.reason}</p>}
+          {sessions.length > 0 && (
+            <>
+              <div className="label" style={{ marginTop: 14 }}>Agent sessions seen</div>
+              <ul className="agentlist">
+                {sessions.slice(0, 4).map((s) => (
+                  <li key={`${s.agent}:${s.session ?? '-'}`}>
+                    <span className="dot dot--green" />
+                    <span>{s.agent} <span className="muted mono">{s.session?.slice(0, 8) ?? ''}</span></span>
+                    <span className="muted">{s.events} events · {timeAgo(s.lastEventAt)}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </Card>
       </div>
 
@@ -56,7 +77,11 @@ export function ActivityPage() {
           </div>
         }
       >
-        {filter === 'agent' && !shown.length ? <div className="events-empty">No AI agent events. Agent activity observation is not available yet.</div> : <EventList events={shown} />}
+        {filter === 'agent' && !shown.length ? (
+          <div className="events-empty">No agent events recorded yet. Configure Claude Code or Cursor on the AI Agents page, then start a session.</div>
+        ) : (
+          <EventList events={shown} />
+        )}
       </Card>
     </div>
   );

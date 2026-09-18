@@ -1,8 +1,10 @@
 import type { ProjectModel } from '../../model/project-model.js';
+import type { SecurityScan } from '../../model/security-scan.js';
+import type { KnowledgeExtras } from '../generate.js';
 import type { Section } from '../managed-blocks.js';
 import { bullets, code, esc, evidenceList, notDetected, table, unknown } from '../md.js';
 
-export function renderSecurity(m: ProjectModel): Section[] {
+export function renderSecurity(m: ProjectModel, extras: KnowledgeExtras = {}): Section[] {
   const s: Section[] = [];
 
   s.push({
@@ -12,7 +14,7 @@ export function renderSecurity(m: ProjectModel): Section[] {
       '',
       bullets([
         '**Detected** — observed directly in code/config by Athena, with evidence.',
-        '**Verified** — confirmed by a human or a dedicated security tool run. _Athena Phase 1 produces no Verified findings._',
+        '**Verified** — reported by a dedicated security tool (dependency audits below), or confirmed by a human.',
         '**Potential** — pattern that may indicate a problem; requires human review.',
         '**Unknown** — not determinable by static analysis.',
       ]),
@@ -67,13 +69,37 @@ export function renderSecurity(m: ProjectModel): Section[] {
     content: ['## Security Tooling', '', m.security.tooling.length ? table(['Tool', 'Evidence'], dedupe(m.security.tooling).map((t) => [esc(t.name), evidenceList(t.provenance.evidence, 2)])) : notDetected('security tooling (dependency scanning, SAST, secret scanning)')].join('\n'),
   });
 
-  s.push({
-    id: 'dependencies',
-    content: ['## Dependency Risks', '', 'Not analyzed in Phase 1. Athena will integrate native audit tools (`npm audit`, `pip-audit`, `govulncheck`, `cargo audit`) in a later phase.', '', `Manifests in scope: ${m.manifests.length ? m.manifests.map((x) => code(x.path)).slice(0, 15).join(', ') : '_none_'}`].join('\n'),
-  });
+  s.push({ id: 'dependencies', content: renderDependencyRisks(m, extras.securityScan ?? null) });
 
   s.push({ id: 'known-issues', content: '## Known Unresolved Security Issues\n\n_None recorded by Athena._ Track confirmed issues in Developer Notes (without exploit details or secrets).' });
   return s;
+}
+
+function renderDependencyRisks(m: ProjectModel, scan: SecurityScan | null): string {
+  const head = ['## Dependency Risks', ''];
+  const manifests = `Manifests in scope: ${m.manifests.length ? m.manifests.map((x) => code(x.path)).slice(0, 15).join(', ') : '_none_'}`;
+  if (!scan) {
+    return [...head, 'No dependency audit has been run. Run `athena security` to audit dependencies with the tools installed for this project.', '', manifests].join('\n');
+  }
+  const lines = [...head, `Last scan: ${scan.scannedAt} (${(scan.durationMs / 1000).toFixed(1)}s). Findings come from the tools below, not from Athena.`, ''];
+  const ran = scan.tools.filter((t) => t.status === 'ok');
+  const missing = scan.tools.filter((t) => t.status !== 'ok');
+  const findings = ran.flatMap((t) => t.findings.map((f) => ({ ...f, tool: t.tool })));
+
+  if (findings.length) {
+    const rows = findings
+      .slice(0, 60)
+      .map((f) => [esc(f.package), f.severity.toUpperCase(), esc(f.title.slice(0, 90)), esc(f.id ?? '—'), esc(f.tool), f.fixAvailable ? 'yes' : 'unknown']);
+    lines.push(`**Detected by tooling:** ${findings.length} vulnerable dependenc${findings.length === 1 ? 'y' : 'ies'}.`, '', table(['Package', 'Severity', 'Advisory', 'ID', 'Tool', 'Fix available'], rows));
+    if (findings.length > 60) lines.push('', `_Showing 60 of ${findings.length}. See \`.athena/security-scan.json\`._`);
+  } else if (ran.length) {
+    lines.push(`**Detected:** no known vulnerable dependencies reported by ${ran.map((t) => esc(t.tool)).join(', ')} at the time of the scan.`);
+  }
+  if (missing.length) {
+    lines.push('', '**Unknown** — these ecosystems were not audited:', '', bullets(missing.map((t) => `${esc(t.tool)} (${esc(t.ecosystem)}): ${esc(t.message ?? t.status)}`)));
+  }
+  lines.push('', manifests, '', '_Athena does not maintain its own vulnerability database, and a clean audit is not proof that dependencies are safe._');
+  return lines.join('\n');
 }
 
 function dedupe<T extends { name: string }>(items: T[]): T[] {

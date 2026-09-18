@@ -11,6 +11,10 @@ import { rulesAddCommand, rulesDisableCommand, rulesEditCommand, rulesEnableComm
 import { cleanCommand } from './commands/clean.js';
 import { openCommand } from './commands/open.js';
 import { syncCommand } from './commands/sync.js';
+import { eventCommand } from './commands/event.js';
+import { activityCommand } from './commands/activity.js';
+import { securityCommand } from './commands/security.js';
+import { reviewCommand } from './commands/review.js';
 import { watchCommand } from './commands/watch.js';
 import { agentsAddCommand, agentsListCommand, agentsRemoveCommand } from './commands/agents.js';
 
@@ -28,8 +32,6 @@ process.on('SIGINT', onSignal);
 process.on('SIGTERM', onSignal);
 
 const PLANNED: Array<{ name: string; description: string; phase: number }> = [
-  { name: 'security', description: 'Run security analysis (dependency audit, secret scan report)', phase: 5 },
-  { name: 'review', description: 'Review the current diff against rules and code-review.md', phase: 5 },
   { name: 'architecture', description: 'Explore the project graph and architecture', phase: 6 },
 ];
 
@@ -98,6 +100,22 @@ export function buildProgram(): Command {
     .action(run(async (o: { autoApply?: boolean; debounce?: string }, cmd: Command) => watchCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
+    .command('security')
+    .description('Scan dependencies with the audit tools installed for this project, and report secret findings')
+    .option('--no-audit', 'Skip dependency audits (report secrets only)')
+    .option('--fail-on <severity>', 'Exit 1 when a finding at or above this severity exists (critical, high, moderate, low)')
+    .option('--last', 'Show the last scan instead of running a new one')
+    .action(run(async (o: { audit?: boolean; failOn?: string; last?: boolean }, cmd: Command) => securityCommand({ ...globals(cmd), noAudit: o.audit === false, failOn: o.failOn, last: o.last, signal: controller.signal })));
+
+  program
+    .command('review')
+    .description('Check the current diff for facts worth reviewing, and list the project rules and checklist')
+    .option('--base <ref>', 'Compare against this Git ref instead of the working tree')
+    .option('--no-sync', 'Skip the knowledge freshness check')
+    .option('--no-fail', 'Always exit 0, even when blockers are found')
+    .action(run(async (o: { base?: string; sync?: boolean; fail?: boolean }, cmd: Command) => reviewCommand({ ...globals(cmd), base: o.base, noSync: o.sync === false, noFail: o.fail === false, signal: controller.signal })));
+
+  program
     .command('status')
     .description('Show knowledge health and changes since the last analysis')
     .action(run(async (_o: unknown, cmd: Command) => statusCommand({ ...globals(cmd), signal: controller.signal })));
@@ -129,6 +147,27 @@ export function buildProgram(): Command {
     .option('--no-open', 'Do not launch a browser')
     .option('--no-watch', 'Do not watch the project for changes')
     .action(run(async (o: { port?: string; host?: string; open?: boolean; allowRemote?: boolean; watch?: boolean }, cmd: Command) => openCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+
+  program
+    .command('activity')
+    .description('Show AI agent activity observed through hooks')
+    .option('-n, --limit <count>', 'Number of events to show (default 30)')
+    .option('--agent <id>', 'Only show events from this agent')
+    .action(run(async (o: { limit?: string; agent?: string }, cmd: Command) => activityCommand({ ...globals(cmd), ...o })));
+
+  program
+    .command('event')
+    .description('Record an agent hook event (called by AI coding agents, reads JSON on stdin)')
+    .option('--agent <id>', 'Agent that fired the hook')
+    .option('--hook <name>', 'Hook event name')
+    .option('--athena-hook', 'Marker used to identify Athena-managed hook entries')
+    .option('--verbose-errors', 'Print errors to stderr (hooks stay silent by default)')
+    .action(
+      run(async (o: { agent?: string; hook?: string; verboseErrors?: boolean }, cmd: Command) => {
+        const g = globals(cmd);
+        await eventCommand({ agent: o.agent, hook: o.hook, cwd: g.cwd, verbose: o.verboseErrors });
+      }),
+    );
 
   program
     .command('clean')

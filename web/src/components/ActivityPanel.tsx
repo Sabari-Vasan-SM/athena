@@ -25,9 +25,7 @@ export function ActivityPanel({ compact = false }: { compact?: boolean }) {
         {idle ? (
           <>
             <p className="activity-panel__task">Waiting for an AI coding agent…</p>
-            <p className="activity-panel__note">
-              Live agent activity needs agent hook integrations (planned for Phase 4). For now this panel shows only what Athena itself does.
-            </p>
+            <p className="activity-panel__note">Agents configured with hooks report their tool use here as it happens.</p>
           </>
         ) : (
           <>

@@ -58,12 +58,15 @@ Generated content sits between `athena:generated` markers. Anything outside the 
 | `athena doctor` | Check the installation, project, knowledge files and agent integrations |
 | `athena rules` | `list`, `add "<rule>" --section <name>`, `edit`, `enable`, `disable`, `remove` |
 | `athena agents` | `list`, `add <claude-code\|cursor\|antigravity\|agents-md\|all>`, `remove` |
+| `athena activity` | Show AI agent activity observed through hooks (`-n`, `--agent`) |
+| `athena security` | Audit dependencies with the tools installed for this project, and report secret findings (`--fail-on`, `--last`, `--no-audit`) |
+| `athena review` | Check the current diff for facts worth reviewing, and list your rules and checklist (`--base`, `--no-fail`) |
 | `athena open` | Start (or reuse) the local web UI on `127.0.0.1`, watch for changes, and open it (`--port`, `--no-open`, `--no-watch`) |
 | `athena clean` | Remove `.athena/` and Athena integration blocks |
 
 Global flags: `--json`, `--quiet`, `--cwd <dir>`, `--no-color`.
 
-`security`, `review` and `architecture` are reserved for upcoming phases. They print *Not available yet* and exit with code 2. See [docs/ROADMAP.md](docs/ROADMAP.md).
+`architecture` is reserved for a later phase. They print *Not available yet* and exit with code 2. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Keeping knowledge in sync
 
@@ -96,6 +99,39 @@ Apply updates to 2 documents? [y/N]
 - `athena sync --check` exits with 1 when knowledge is out of date, which is useful in CI or a pre-commit hook.
 - Ignore rules: defaults, root and nested `.gitignore` files, `.git/info/exclude`, and `.athena/config.json`.
 
+## Watching what agents do
+
+Athena configures hooks for agents that support them, so it can show what they actually did:
+
+| Agent | Mechanism |
+|---|---|
+| Claude Code | Hooks in `.claude/settings.json` running `athena event` (async, so the agent is never blocked) |
+| Cursor | Hooks in `.cursor/hooks.json` plus a small forwarding script |
+| Antigravity | No documented hook mechanism — activity is reported as unavailable |
+
+Hooks append events to `.athena/.agent-events.jsonl` (gitignored, rotated, no network). The UI tails that file, so activity shows up live and history survives with the UI closed.
+
+```text
+$ athena activity
+20:03:58  ● claude-code · Editing src/components/Pricing.tsx
+20:04:07  ● claude-code · Running tests: npm test -- billing
+20:04:31  ● claude-code · Finished responding
+```
+
+**What Athena can and cannot see.** It records which tool ran, on which files, and when. It never records the agent's reasoning, and prompt text is not stored. Secrets in commands are redacted, and paths are stored project-relative. When no hook has fired, Athena says nothing about whether an agent is running.
+
+## Security and review
+
+```bash
+athena security          # audit dependencies + report secret findings
+athena security --fail-on high   # exit 1 in CI
+athena review                     # check the current diff before you commit
+```
+
+**`athena security`** runs the audit tools your project's ecosystems provide (`npm audit`, `pnpm audit`, `pip-audit`, `govulncheck`, `cargo audit`, `composer audit`) and reports what they find, attributed to the tool. Athena has no vulnerability database of its own: a tool that isn't installed is reported as **unknown**, never as "no problems". Results are stored in `.athena/security-scan.json` and recorded in `security.md` on the next `athena sync`.
+
+**`athena review`** checks facts about your current diff: secrets in added lines (a blocker, exit 1), committed env files, new dependencies, source changed without tests, API/schema/auth touchpoints, large files, debug leftovers, and whether Athena knowledge is stale. It then lists your enabled rules and the project's review checklist for you or your agent to apply — Athena does not claim to judge whether they are met, and it runs no AI.
+
 ## Web UI
 
 ```bash
@@ -118,9 +154,10 @@ The local web UI lets you:
 - search all knowledge (⌘K)
 - manage rules: add, edit, enable/disable, delete. `rules.md` stays the source of truth.
 - configure or remove agent integrations
-- follow an activity timeline of what Athena actually observed: analyses, UI edits, and knowledge files changed on disk
+- follow an activity timeline of what Athena actually observed: agent tool use (via hooks), analyses, UI edits, and knowledge files changed on disk
+- run dependency audits from the **Security** page and review findings by severity
 
-The robot indicator reflects Athena's own work (analyzing, finished, error). **AI agent activity is not shown yet.** Observing agents needs hook integrations (Phase 4), and the UI says so instead of simulating it.
+The robot indicator reflects real work: Athena's own analyses, and — for agents with hooks installed — the agent's current tool use (reading, coding, testing). With no hook events it stays idle and says so, rather than simulating activity.
 
 Security: the server binds to `127.0.0.1` only, on the first free port from 7432. Every API call needs the random per-session token from the link, which travels in the URL fragment and is never sent in requests or referrers. Host and Origin headers are checked, a strict Content-Security-Policy applies, and only the fixed set of `.athena` documents can be read or written.
 

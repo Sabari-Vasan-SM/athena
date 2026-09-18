@@ -38,12 +38,23 @@ export class EventBus {
 
   constructor(private readonly capacity = 500) {}
 
-  emit(e: Omit<AthenaEvent, 'id' | 'ts'>): AthenaEvent {
-    const event: AthenaEvent = { id: crypto.randomUUID(), ts: new Date().toISOString(), ...e };
+  emit(e: Omit<AthenaEvent, 'id' | 'ts'> & { id?: string; ts?: string }): AthenaEvent {
+    const event: AthenaEvent = { id: e.id ?? crypto.randomUUID(), ts: e.ts ?? new Date().toISOString(), ...e };
     this.buffer.push(event);
     if (this.buffer.length > this.capacity) this.buffer.splice(0, this.buffer.length - this.capacity);
     for (const l of this.listeners) l(event);
     return event;
+  }
+
+  /** Add historical events (e.g. from the agent log) without notifying listeners. */
+  seed(events: AthenaEvent[]): void {
+    this.buffer.push(...events);
+    this.buffer.sort((a, b) => a.ts.localeCompare(b.ts));
+    if (this.buffer.length > this.capacity) this.buffer.splice(0, this.buffer.length - this.capacity);
+  }
+
+  has(id: string): boolean {
+    return this.buffer.some((e) => e.id === id);
   }
 
   recent(limit = 200): AthenaEvent[] {

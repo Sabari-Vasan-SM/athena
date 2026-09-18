@@ -57,18 +57,39 @@ Status legend: ✅ done · 🔜 next · 📋 planned
 - Reasons for a document list every model change mapped to it, not only the ones that caused the specific changed lines.
 - The watcher does not follow symlinked directories, and Git HEAD watching expects a standard `.git` directory layout.
 
-## Phase 4: Deeper agent integration 📋
+## Phase 4: Deeper agent integration ✅
 
-- Claude Code hooks (`PreToolUse`/`PostToolUse`/`UserPromptSubmit`/`Stop`) call `athena event`, which posts observed activity to the local server
-- Cursor hooks where supported
-- Process detection, clearly labeled "running, not confirmed working"
-- Re-verify each agent's instruction mechanism against its current docs
+- ✅ Verified each agent's documented hook mechanism before implementing (Claude Code: `code.claude.com/docs/en/hooks`; Cursor: `cursor.com/docs/agent/hooks`, both checked 2026-09)
+- ✅ Claude Code hooks in `.claude/settings.json` (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`, `SessionEnd`), exec form with `args` (no shell) and `async: true` so the agent is never blocked
+- ✅ Cursor hooks in `.cursor/hooks.json` plus a generated forwarding script (Cursor executes a script path)
+- ✅ `athena event`: reads the hook payload on stdin, never writes stdout, always exits 0, and appends to `.athena/.agent-events.jsonl` (no network, no token, rotated, gitignored)
+- ✅ Honest normalization: tool → state (read → ANALYZING, edit → CODING, test command → TESTING, lint/audit → REVIEWING, stop → SUCCESS); `PostToolUse` ignored to avoid duplicates; prompt text never stored; secrets redacted; paths project-relative
+- ✅ Server tails the log: live events over SSE, history seeded on startup, robot driven by the agent with a 5-minute freshness window
+- ✅ `athena activity` CLI, per-agent observation status and session summaries in the UI and `athena doctor` (including a PATH check, since hooks invoke `athena`)
+- ✅ JSON configs are merged, never overwritten: user hooks are preserved, Athena entries are marked, and removal restores the original file
 
-## Phase 5: Security and review 📋
+**Known Phase 4 limitations**
+- Antigravity publishes no hook mechanism, so its activity is reported as unsupported.
+- The Cursor forwarding script is generated for the current platform (`.sh` or `.cmd`); a repo shared across platforms needs a re-run of `athena agents add cursor`.
+- Athena cannot tell whether an agent is running when no hook has fired, and it never sees reasoning or plans.
+- Hooks require `athena` on PATH (or `ATHENA_HOOK_COMMAND`); doctor warns when it is not.
 
-- Native audit tools (`npm audit`, `pip-audit`, `govulncheck`, `cargo audit`) run with fixed argv; findings are labeled *Detected by tool*
-- `athena security`, and `athena review` of the git diff against rules and `code-review.md`
-- Secret-scan CI mode
+## Phase 5: Security and review ✅
+
+- ✅ `athena security`: runs native audit tools (`npm audit`, `pnpm audit`, `pip-audit`, `govulncheck`, `cargo audit`, `composer audit`) with fixed argv, per-tool timeouts, and availability checks — a missing tool is reported as unknown, never as "no problems"
+- ✅ Findings normalized (package, severity, advisory, id, url, fix availability) and attributed to the producing tool; stored in `.athena/security-scan.json`
+- ✅ Rendered into `security.md` through the normal sync flow, so scan results are reviewable like any other knowledge change
+- ✅ `--fail-on <severity>` and secret findings for CI; `--last` to re-read the previous scan; `--no-audit` for secrets only
+- ✅ `athena review`: deterministic checks over the current diff — secrets in added lines (blocker, exit 1), committed env files, new dependencies, source changed without tests, API/schema/auth touchpoints, large added files, debug leftovers, high/critical advisories from the last scan, and knowledge freshness
+- ✅ Review prints the project's enabled rules and `code-review.md` checklist as items for a human or agent to apply, without claiming to evaluate them
+- ✅ Security page in the web UI (scan, severity table, tool status, secret locations) and `/api/security`, `/api/security/scan`, `/api/review`
+- ✅ Tests: tool availability/parsing/persistence, threshold logic, rendering with tool attribution, review findings and exit codes, and no-secret-leak assertions throughout
+
+**Known Phase 5 limitations**
+- Audits need the ecosystem's tool installed, and most need network access. Yarn (Berry) and bundler-audit are not covered.
+- `npm audit` severities come from npm; `pip-audit` and `govulncheck` report no severity, so those findings show as unknown.
+- Review is deterministic and syntactic: it reads paths and added lines, not semantics. It cannot tell whether a rule was actually followed.
+- No SAST, no license checks, and no automatic fixes.
 
 ## Phase 6: Intelligence 📋
 

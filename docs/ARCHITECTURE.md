@@ -146,6 +146,27 @@ graph LR
 - **Stable rendering:** rendered documents must not churn on incidental changes. Avoid exact counts or byte sizes in generated sections; keep them in `model.json` or the UI.
 - **Watcher ownership:** the watcher ignores `.athena/`, so knowledge edits don't trigger plans. The server re-plans explicitly after UI edits that could invalidate a proposal.
 
+## Agent activity (Phase 4)
+
+```mermaid
+graph LR
+  agent["Coding agent"] -->|hook fires| cli["athena event (stdin JSON)"]
+  cli --> norm["normalizeHookEvent: tool to state"]
+  norm --> log[".athena/.agent-events.jsonl"]
+  log -->|tailed| server["Local server"]
+  server -->|SSE| ui["Activity timeline and robot"]
+```
+
+- **File, not HTTP:** hooks never need a token, a running server or the network, and events recorded while the UI was closed still appear later. The server tracks a byte offset and re-reads only new lines.
+- **Fast and safe by construction:** `athena event` writes nothing to stdout (agents may parse it), always exits 0, and is installed with `async: true` so a slow disk cannot stall an agent.
+- **Only facts:** the tool name, files and command, mapped to a display state. Prompts and reasoning are never stored; commands are redacted and paths made project-relative.
+
+## Security and review (Phase 5)
+
+- **No bundled vulnerability data.** `services/security.ts` defines one runner per ecosystem (command, argv, applicability, parser). Runners execute with `execFile` and fixed arguments. Availability is checked first, so "not installed" is never reported as "clean".
+- **Scan results are a sidecar** (`.athena/security-scan.json`) rendered into `security.md` by `KnowledgeExtras`, which keeps the analyzer free of network/tool dependencies while letting scan results flow through the normal sync review.
+- **Review is deterministic** (`services/review.ts`): every finding is a fact about the diff (added lines, changed paths, manifest deltas). Rules and the checklist are surfaced, never judged.
+
 ## Decisions
 
 See `docs/adr/`.

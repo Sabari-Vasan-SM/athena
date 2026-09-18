@@ -41,7 +41,7 @@ export function AgentsPage() {
       </header>
 
       <div className="note">
-        <strong>What "configured" means:</strong> Athena's instruction files are in place for that agent. Athena cannot yet observe whether an agent is running or what it is doing — live activity requires hook integrations, planned for Phase 4.
+        <strong>What "configured" means:</strong> Athena's instruction files are in place, and for agents that support hooks, those hooks report tool use to Athena. Athena sees which tool ran and on which files — never the agent's reasoning. It cannot tell whether an agent is running when no hook has fired.
       </div>
 
       <div className="agents">
@@ -58,7 +58,18 @@ export function AgentsPage() {
               <div><dt>Files</dt><dd className="mono">{a.files.length ? a.files.join(', ') : '—'}</dd></div>
               {a.configuredAt && <div><dt>Configured</dt><dd>{timeAgo(a.configuredAt)}</dd></div>}
               {a.detectedInProject && <div><dt>Evidence</dt><dd className="mono">{a.evidence.join(', ')}</dd></div>}
-              <div><dt>Activity</dt><dd className="muted">Not available (Phase 4)</dd></div>
+              <div>
+                <dt>Activity</dt>
+                <dd>
+                  {a.activityObservation === 'hooks' ? (
+                    <>Reporting via hooks{a.lastActivityAt ? <span className="muted"> · last seen {timeAgo(a.lastActivityAt)} · {a.observedEvents} events</span> : <span className="muted"> · nothing observed yet</span>}</>
+                  ) : a.activityObservation === 'not-configured' ? (
+                    <span className="muted">Hooks not installed — configure to see activity</span>
+                  ) : (
+                    <span className="muted">No documented hook mechanism</span>
+                  )}
+                </dd>
+              </div>
             </dl>
             {a.checks.length > 0 && (
               <ul className="checks">

@@ -191,7 +191,7 @@ describe('athena CLI', () => {
     const notInit = await runCli(['status'], dir);
     expect(notInit.code).toBe(3);
     expect(notInit.stderr).toContain('athena init');
-    const planned = await runCli(['security'], dir);
+    const planned = await runCli(['architecture'], dir);
     expect(planned.code).toBe(2);
     expect(planned.stdout).toContain('Not available yet');
     const unknown = await runCli(['init', '--agents', 'copilotx'], dir);

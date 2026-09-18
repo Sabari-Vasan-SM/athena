@@ -98,7 +98,9 @@ function stripPrefix(files: ChangedFile[], prefix: string): ChangedFile[] {
 
 /** Files changed in commits between `fromRef` and HEAD. */
 export async function changesSince(cwd: string, fromRef: string): Promise<ChangedFile[] | null> {
-  if (!/^[0-9a-f]{7,64}$/i.test(fromRef)) return null;
+  // Accept commit SHAs and ordinary ref expressions (HEAD~1, origin/main, v1.2.3),
+  // but never anything that could be read as an option or shell metacharacter.
+  if (!isSafeRef(fromRef)) return null;
   const r = await git(cwd, ['diff', '--name-status', '-M', '-z', `${fromRef}..HEAD`, '--', '.']);
   if (!r.ok) return null;
   const prefix = await repoPrefix(cwd);
@@ -115,6 +117,11 @@ export async function changesSince(cwd: string, fromRef: string): Promise<Change
     }
   }
   return stripPrefix(out, prefix);
+}
+
+/** Conservative allowlist for user-supplied git refs. */
+export function isSafeRef(ref: string): boolean {
+  return /^[A-Za-z0-9][\w./@^~-]{0,119}$/.test(ref);
 }
 
 export interface CommitSummary {

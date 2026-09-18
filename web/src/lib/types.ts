@@ -89,7 +89,24 @@ export interface AgentView {
   note: string;
   capabilities: { instructionsFile: boolean; scopedRules: boolean; hooks: boolean; mcp: boolean };
   checks: Array<{ ok: boolean; level: 'ok' | 'warn' | 'error'; message: string }>;
-  activityObservation: 'not-available';
+  activityObservation: 'hooks' | 'not-configured' | 'unsupported';
+  lastActivityAt: string | null;
+  observedEvents: number;
+}
+
+export interface AgentSession {
+  agent: string;
+  session: string | null;
+  lastEventAt: string;
+  lastMessage: string;
+  events: number;
+}
+
+export interface ActivityResponse {
+  activity: Activity;
+  events: AthenaEvent[];
+  sessions: AgentSession[];
+  agentObservation: { available: boolean; agents: string[]; reason: string };
 }
 
 export type ActivityState = 'IDLE' | 'ANALYZING' | 'PLANNING' | 'CODING' | 'TESTING' | 'REVIEWING' | 'SUCCESS' | 'ERROR';
@@ -160,4 +177,29 @@ export interface SyncStatus {
   watching: boolean;
   lastCheckedAt: string | null;
   plan: SyncPlan | null;
+}
+
+export type Severity = 'critical' | 'high' | 'moderate' | 'low' | 'unknown';
+
+export interface Vulnerability {
+  package: string;
+  severity: Severity;
+  title: string;
+  id?: string;
+  url?: string;
+  vulnerableRange?: string;
+  fixAvailable?: boolean;
+}
+
+export interface SecurityScan {
+  scannedAt: string;
+  durationMs: number;
+  tools: Array<{ tool: string; ecosystem: string; status: 'ok' | 'unavailable' | 'failed' | 'timeout'; message?: string; durationMs: number; findings: Vulnerability[] }>;
+  counts: Record<Severity, number>;
+  secrets: { count: number; files: string[] };
+}
+
+export interface SecurityState {
+  scan: SecurityScan | null;
+  running: boolean;
 }

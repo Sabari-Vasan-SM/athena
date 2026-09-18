@@ -13,7 +13,12 @@ import { configureAgents, listAgents, removeAgents } from '../services/agents.js
 import { getOverview } from '../services/overview.js';
 import { runPipeline } from '../services/pipeline.js';
 import { applySync, ignorePlan, planSync, type SyncPlan } from '../services/sync.js';
+import { loadScan, runSecurityScan, saveScan, type SecurityScan } from '../services/security.js';
+import { reviewChanges } from '../services/review.js';
+import { ProjectModel } from '../core/model/project-model.js';
 import { watchProject, type ProjectWatcher } from '../services/watch.js';
+import { ACTIVITY_FILE, activityFile, parseEventLines, readRecentEvents, summarizeSessions } from '../services/agent-activity.js';
+import type { AgentEvent } from '../agents/common/hook-events.js';
 import { ATHENA_VERSION } from '../services/version.js';
 import { EventBus } from './events.js';
 import { allowedHostsFor, allowedOriginsFor, makeGuard, SECURITY_HEADERS } from './security.js';
@@ -70,6 +75,9 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
   let lastCheckedAt: string | null = null;
   let watcher: ProjectWatcher | null = null;
   let syncBusy = false;
+  let activityOffset = 0;
+  /** Agent activity is only shown while it is fresh; after this it reverts to idle. */
+  const AGENT_IDLE_MS = 5 * 60 * 1000;
   let statusCache: { at: number; report: StatusReport } | null = null;
 
   app.addHook('onRequest', makeGuard({
@@ -244,6 +252,56 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     },
   );
 
+  // ---- agent activity (from hooks) -----------------------------------------------------------
+  const toAthenaEvent = (e: AgentEvent) => ({
+    id: e.id,
+    ts: e.ts,
+    source: 'agent' as const,
+    type: `agent.${e.kind}`,
+    level: (e.kind === 'stop' ? 'success' : 'info') as 'success' | 'info',
+    message: `${e.agent}: ${e.message}`,
+    data: { agent: e.agent, session: e.session, hook: e.hook, files: e.files, command: e.command, tool: e.tool },
+  });
+
+  const applyAgentEvent = (e: AgentEvent, live: boolean) => {
+    if (events.has(e.id)) return;
+    if (live) events.emit(toAthenaEvent(e));
+    else events.seed([{ ...toAthenaEvent(e) }]);
+    if (!live) return;
+    if (e.state === 'IDLE') {
+      if (events.activity().actor === 'agent') events.setActivity({ state: 'IDLE', actor: 'none', task: null, reading: [] });
+      return;
+    }
+    // Athena's own analysis takes precedence only while it is running.
+    if (analysisRunning) return;
+    events.setActivity({ state: e.state, actor: 'agent', task: `${e.agent}: ${e.message}`, reading: e.files.slice(0, 4) }, e.state === 'SUCCESS' ? 10_000 : AGENT_IDLE_MS);
+  };
+
+  const readNewAgentEvents = async () => {
+    try {
+      const file = activityFile(root);
+      const st = await fs.stat(file).catch(() => null);
+      if (!st) return;
+      if (st.size < activityOffset) activityOffset = 0; // file rotated
+      if (st.size === activityOffset) return;
+      const handle = await fs.open(file, 'r');
+      try {
+        const length = st.size - activityOffset;
+        const buf = Buffer.alloc(length);
+        await handle.read(buf, 0, length, activityOffset);
+        const text = buf.toString('utf8');
+        const lastNewline = text.lastIndexOf('\n');
+        if (lastNewline === -1) return; // partial line; wait for the rest
+        activityOffset += Buffer.byteLength(text.slice(0, lastNewline + 1));
+        for (const e of parseEventLines(text.slice(0, lastNewline + 1))) applyAgentEvent(e, true);
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      /* activity log unreadable: ignore */
+    }
+  };
+
   // ---- synchronization ----------------------------------------------------------------------
   const setPlan = (plan: SyncPlan | null) => {
     lastCheckedAt = new Date().toISOString();
@@ -302,8 +360,75 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     return { ok: true };
   });
 
+  // ---- security & review ---------------------------------------------------------------------
+  let scanRunning = false;
+  const projectModel = async (): Promise<ProjectModel> => {
+    const raw = await fs.readFile(path.join(athenaDir(root), 'model.json'), 'utf8').catch(() => null);
+    if (raw) {
+      const parsed = ProjectModel.safeParse(JSON.parse(raw));
+      if (parsed.success) return parsed.data;
+    }
+    throw new AthenaError('model.json is missing.', 'Run `athena analyze` (or re-analyze from the overview) first.');
+  };
+
+  app.get('/api/security', async () => ({ scan: await loadScan(root), running: scanRunning }));
+
+  app.post<{ Body: { skipAudit?: boolean } }>(
+    '/api/security/scan',
+    { schema: { body: { type: 'object', additionalProperties: false, properties: { skipAudit: { type: 'boolean' } } } } },
+    async (req, reply) => {
+      if (scanRunning) throw new AthenaError('A security scan is already running.', undefined, 1, 'busy');
+      scanRunning = true;
+      const model = await projectModel();
+      events.emit({ source: 'web-ui', type: 'security.started', level: 'info', message: 'Security scan started' });
+      events.setActivity({ state: 'REVIEWING', actor: 'athena', task: 'Scanning dependencies', reading: [] });
+      void runSecurityScan(root, model, { skipAudit: req.body?.skipAudit, onTool: (tool) => events.setActivity({ state: 'REVIEWING', actor: 'athena', task: `Running ${tool}`, reading: [] }) })
+        .then(async (scan: SecurityScan) => {
+          await saveScan(root, scan);
+          const findings = scan.tools.reduce((n, t) => n + t.findings.length, 0);
+          events.emit({
+            source: 'athena',
+            type: 'security.completed',
+            level: findings || scan.secrets.count ? 'warn' : 'success',
+            message: `Security scan finished — ${findings} dependency finding(s), ${scan.secrets.count} potential secret(s)`,
+            data: { findings, secrets: scan.secrets.count },
+          });
+          events.setActivity({ state: 'SUCCESS', actor: 'athena', task: 'Security scan complete', reading: [] }, 4000);
+          replanSoon();
+        })
+        .catch((err: Error) => {
+          events.emit({ source: 'athena', type: 'security.failed', level: 'error', message: `Security scan failed: ${err.message}` });
+          events.setActivity({ state: 'ERROR', actor: 'athena', task: 'Security scan failed', reading: [] }, 8000);
+        })
+        .finally(() => {
+          scanRunning = false;
+        });
+      return reply.code(202).send({ accepted: true });
+    },
+  );
+
+  app.get<{ Querystring: { base?: string } }>('/api/review', async (req) => {
+    const base = typeof req.query.base === 'string' && req.query.base ? req.query.base : undefined;
+    return reviewChanges(root, { base, checkSync: async (r) => (await planSync(r)).upToDate });
+  });
+
   // ---- events (streamed) ------------------------------------------------------------------
-  app.get('/api/activity', async () => ({ activity: events.activity(), events: events.recent(), agentObservation: { available: false, reason: 'AI agent activity requires hook integrations (planned for Phase 4). Athena currently shows only its own actions and knowledge file changes.' } }));
+  app.get('/api/activity', async () => {
+    const agents = await listAgents(root);
+    const observing = agents.filter((a) => a.activityObservation === 'hooks');
+    return {
+      activity: events.activity(),
+      events: events.recent(),
+      sessions: summarizeSessions(await readRecentEvents(root, 500)),
+      agentObservation: {
+        available: observing.length > 0,
+        agents: observing.map((a) => a.name),
+        reason: observing.length
+          ? 'Events below come from hooks the agent fired. Athena sees which tool ran and on which files — never the agent\'s reasoning.'
+          : 'No agent is reporting activity yet. Configure an agent with hooks (Claude Code or Cursor) to see its actions here.',
+      },
+    };
+  });
 
   app.get('/api/events', (req, reply) => {
     reply.hijack();
@@ -355,6 +480,10 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     const dir = athenaDir(root);
     docsWatcher = watch(dir, { persistent: false }, (_type, filename) => {
       const name = filename?.toString();
+      if (name === ACTIVITY_FILE) {
+        void readNewAgentEvents();
+        return;
+      }
       if (!name || !KNOWLEDGE_DOCS.some((d) => d.file === name)) return;
       clearTimeout(pending.get(name));
       pending.set(
@@ -372,6 +501,13 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     docsWatcher.on('error', () => {});
   } catch {
     docsWatcher = null;
+  }
+
+  // Seed the timeline with agent events recorded while the UI was closed.
+  {
+    const history = await readRecentEvents(root, 200);
+    for (const e of history) applyAgentEvent(e, false);
+    activityOffset = await fs.stat(activityFile(root)).then((st) => st.size).catch(() => 0);
   }
 
   if (opts.watch) {

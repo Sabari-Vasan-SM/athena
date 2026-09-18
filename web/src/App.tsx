@@ -12,6 +12,7 @@ import { RulesPage } from './pages/RulesPage';
 import { AgentsPage } from './pages/AgentsPage';
 import { ActivityPage } from './pages/ActivityPage';
 import { SyncPage } from './pages/SyncPage';
+import { SecurityPage } from './pages/SecurityPage';
 
 const DOC_IDS = new Set<DocId>(['project', 'architecture', 'database', 'api', 'auth', 'security', 'testing', 'debugging', 'performance', 'code-review', 'deployment', 'rules']);
 
@@ -30,6 +31,7 @@ function Page({ path }: { path: string }) {
   if (docMatch && DOC_IDS.has(docMatch[1] as DocId)) return <DocPage key={docMatch[1]} id={docMatch[1] as DocId} />;
   if (path === '/rules') return <RulesPage />;
   if (path === '/sync') return <SyncPage />;
+  if (path === '/security') return <SecurityPage />;
   if (path === '/agents') return <AgentsPage />;
   if (path === '/activity') return <ActivityPage />;
   return (
