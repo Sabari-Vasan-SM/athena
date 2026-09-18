@@ -7,7 +7,7 @@ Athena analyzes your repository and maintains a structured, human-readable under
 Athena doesn't replace your coding agent, and it doesn't claim to make code bug-free or secure. It makes agents more **project-aware**, and it is honest about what it knows.
 
 ```bash
-npm install -g athena-cli   # requires Node.js >= 22.12
+npm install -g project-athena   # requires Node.js >= 22.12
 cd my-project
 athena init
 ```

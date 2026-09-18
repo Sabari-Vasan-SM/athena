@@ -143,7 +143,7 @@ export function printSummary(result: PipelineResult, dryRun: boolean, mode: 'ini
   ui.line();
   ui.line(ui.c.bold(ui.c.green(mode === 'init' ? 'Athena ready.' : 'Analysis complete.')));
   if (mode === 'init') {
-    ui.line(ui.dim('Next: review .athena/rules.md and enable the rules that apply. Web UI (`athena open`) is planned for Phase 2.'));
+    ui.line(ui.dim('Next: review .athena/rules.md and enable the rules that apply, then run `athena open` for the web UI.'));
   }
 }
 

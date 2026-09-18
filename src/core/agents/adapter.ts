@@ -9,9 +9,9 @@ export interface AgentCapabilities {
   instructionsFile: boolean;
   /** Agent supports scoped/conditional rules (globs, descriptions). */
   scopedRules: boolean;
-  /** Agent exposes lifecycle hooks Athena could use to observe activity (Phase 4). */
+  /** Agent exposes lifecycle hooks Athena uses to observe activity. */
   hooks: boolean;
-  /** Agent supports MCP servers (Phase 6). */
+  /** Agent supports MCP servers, which Athena registers. */
   mcp: boolean;
 }
 

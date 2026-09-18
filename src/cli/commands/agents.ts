@@ -17,7 +17,7 @@ export async function agentsListCommand(opts: GlobalOptions): Promise<void> {
     ui.line(`  ${ui.dim(r.note)}`);
   }
   ui.line();
-  ui.line(ui.dim('"Configured" means Athena instruction files are in place. Athena cannot observe agent activity yet (planned for Phase 4).'));
+  ui.line(ui.dim('"Configured" means Athena instruction files are in place. Agents with hooks also report their tool use — see `athena activity`.'));
 }
 
 export async function agentsAddCommand(names: string[], opts: GlobalOptions): Promise<void> {

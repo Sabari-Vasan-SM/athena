@@ -97,7 +97,7 @@ export async function runDoctor(cwd: string): Promise<{ checks: Check[]; root: s
     add(
       resolved
         ? { area: 'Agent hooks', level: 'ok', message: `\`${cmd}\` resolves to ${resolved}` }
-        : { area: 'Agent hooks', level: 'warn', message: `\`${cmd}\` is not on PATH — agent hooks cannot report activity`, hint: 'Install globally (`npm i -g athena-cli`) or set ATHENA_HOOK_COMMAND to an absolute path and re-run `athena agents add`.' },
+        : { area: 'Agent hooks', level: 'warn', message: `\`${cmd}\` is not on PATH — agent hooks cannot report activity`, hint: 'Install globally (`npm i -g project-athena`) or set ATHENA_HOOK_COMMAND to an absolute path and re-run `athena agents add`.' },
     );
     const events = await readRecentEvents(root, 1);
     add({ area: 'Agent hooks', level: 'info', message: events.length ? `Last agent event: ${relativeTime(events[0]!.ts)}` : 'No agent activity recorded yet (hooks fire when an agent runs)' });

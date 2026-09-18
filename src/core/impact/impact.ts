@@ -2,8 +2,7 @@ import type { DocId } from '../knowledge/documents.js';
 
 /**
  * Path-based impact rules: which knowledge documents a changed file may affect.
- * Phase 1 uses these for `athena status`; Phase 3's watcher refines them with
- * detector-input tracking.
+ * Used by `athena status` and combined with the model-level diff in sync planning.
  */
 const RULES: Array<{ match: RegExp; docs: DocId[]; reason: string }> = [
   { match: /(^|\/)(package\.json|pyproject\.toml|requirements[^/]*\.txt|Pipfile|go\.mod|Cargo\.toml|pom\.xml|build\.gradle(\.kts)?|composer\.json|Gemfile|pubspec\.yaml|mix\.exs|[^/]+\.csproj)$/, docs: ['project', 'architecture', 'security', 'testing'], reason: 'dependency manifest' },
