@@ -3,6 +3,7 @@ import { browserUrl, findRunningInstance, startServer } from '../../server/insta
 import { requireProjectRoot, type GlobalOptions } from '../context.js';
 import { AthenaError } from '../../services/errors.js';
 import * as ui from '../ui/term.js';
+import { printHeader } from '../ui/brand.js';
 
 export interface OpenOptions extends GlobalOptions {
   port?: string;
@@ -57,7 +58,7 @@ export async function openCommand(opts: OpenOptions): Promise<void> {
 
   if (ui.isJson()) ui.json({ running: true, reused: false, url: running.url, port: running.info.port, pid: process.pid });
   else {
-    ui.banner();
+    printHeader();
     ui.line(ui.c.bold(ui.c.green('Athena is running')));
     ui.line();
     ui.line(`Local: ${ui.c.cyan(running.url)}`);

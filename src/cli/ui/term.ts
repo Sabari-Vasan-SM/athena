@@ -1,8 +1,8 @@
 import pc from 'picocolors';
 
 const out = process.stdout;
-const isTTY = Boolean(out.isTTY) && process.env.TERM !== 'dumb' && !process.env.CI;
-const unicode = process.platform !== 'win32' || Boolean(process.env.WT_SESSION) || process.env.TERM_PROGRAM === 'vscode' || Boolean(process.env.TERMINAL_EMULATOR);
+export const isTTY = Boolean(out.isTTY) && process.env.TERM !== 'dumb' && !process.env.CI;
+export const unicode = process.platform !== 'win32' || Boolean(process.env.WT_SESSION) || process.env.TERM_PROGRAM === 'vscode' || Boolean(process.env.TERMINAL_EMULATOR);
 
 export const sym = {
   ok: unicode ? '✓' : '√',
@@ -45,27 +45,6 @@ export const dim = (s: string) => c.dim(s);
 
 export function json(value: unknown): void {
   out.write(`${JSON.stringify(value, null, 2)}\n`);
-}
-
-export function banner(): void {
-  if (jsonMode || quiet) return;
-  const title = 'ATHENA';
-  const sub = 'Project Intelligence for AI Coding';
-  const w = sub.length + 4;
-  const pad = (s: string) => {
-    const left = Math.floor((w - s.length) / 2);
-    return ' '.repeat(left) + s + ' '.repeat(w - s.length - left);
-  };
-  if (unicode) {
-    line(c.dim(`╭${'─'.repeat(w)}╮`));
-    line(`${c.dim('│')}${c.bold(c.cyan(pad(title)))}${c.dim('│')}`);
-    line(`${c.dim('│')}${c.dim(pad(sub))}${c.dim('│')}`);
-    line(c.dim(`╰${'─'.repeat(w)}╯`));
-  } else {
-    line(c.bold(c.cyan(title)));
-    line(c.dim(sub));
-  }
-  line();
 }
 
 /** Render a list of paths as a tree under a root label. */

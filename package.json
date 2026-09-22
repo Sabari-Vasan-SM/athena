@@ -4,6 +4,14 @@
   "description": "Athena — local-first project intelligence layer for AI coding agents",
   "author": "Sabarivasan",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sabari-Vasan-SM/athena.git"
+  },
+  "homepage": "https://github.com/Sabari-Vasan-SM/athena#readme",
+  "bugs": {
+    "url": "https://github.com/Sabari-Vasan-SM/athena/issues"
+  },
   "type": "module",
   "bin": {
     "athena": "dist/cli.js"

@@ -2,6 +2,9 @@ import { createRequire } from 'node:module';
 
 /** Must match package.json "name" — the version lookup checks it to avoid reading the wrong manifest. */
 export const PACKAGE_NAME = 'project-athena';
+export const AUTHOR = 'Sabarivasan';
+export const NPM_URL = `https://www.npmjs.com/package/${PACKAGE_NAME}`;
+export const REPO_URL = 'https://github.com/Sabari-Vasan-SM/athena';
 
 function readVersion(): string {
   try {
