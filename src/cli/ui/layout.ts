@@ -78,6 +78,16 @@ export function paint(color: string | RGB, s: string, bold = false): string {
   return `${bold ? '\x1b[1m' : ''}${fg}${s}\x1b[0m`;
 }
 
+/** One terminal cell with separate foreground and background colours (for half-block pixel art). */
+export function cell(ch: string, fg: string | RGB | null, bg: string | RGB | null): string {
+  if (!pc.isColorSupported) return ch;
+  const code = (c: string | RGB, layer: 38 | 48) => {
+    const rgb = typeof c === 'string' ? hex(c) : c;
+    return truecolor ? `\x1b[${layer};2;${rgb[0]};${rgb[1]};${rgb[2]}m` : `\x1b[${layer};5;${ansi256(rgb)}m`;
+  };
+  return `${fg ? code(fg, 38) : ''}${bg ? code(bg, 48) : ''}${ch}\x1b[0m`;
+}
+
 export const PALETTE = {
   green: '#34d399',
   cyan: '#22d3ee',

@@ -1,6 +1,6 @@
 import pc from 'picocolors';
 import { AUTHOR, ATHENA_VERSION, NPM_URL, REPO_URL } from '../../services/version.js';
-import { BRAND, box, center, columns, gradient, gradientBlock, HR, paint, PALETTE, termWidth, vcenter, VR, width } from './layout.js';
+import { BRAND, box, cell, center, columns, gradient, gradientBlock, HR, paint, PALETTE, termWidth, vcenter, VR, width } from './layout.js';
 import { isJson, isQuiet, line, unicode } from './term.js';
 
 const LETTERS: Record<string, string[]> = {
@@ -14,36 +14,73 @@ const LETTERS: Record<string, string[]> = {
 const LOGO = [0, 1, 2, 3, 4, 5].map((r) => [...'ATHENA'].map((ch) => LETTERS[ch]![r]).join(''));
 const LOGO_WIDTH = width(LOGO[0]!);
 
-const ROBOT = [
+/**
+ * Pixel-art robot (speech-bubble head, wink, smile). Each text row packs two
+ * pixel rows using half blocks, so 20×24 pixels render as 10×24 cells.
+ */
+const ROBOT_PIXELS = [
+  '...........AA...........',
+  '..........AAAA..........',
+  '...........KK...........',
+  '....KKKKKKKKKKKKKKKK....',
+  '...KBBBBBBBBBBBBBBBBK...',
+  '..KBBBBBBBBBBBBBBBBBBK..',
+  '..KBBBBWWBBBBBBYYYYBBK..',
+  'YYKBBBWBBWBBBBYYDDYYBKYY',
+  'YYKBBBBBBBBBBBYYDDYYBKYY',
+  'YYKBBBBBBBBBBBBYYYYBBKYY',
+  'YYKBBBBBYYYYYYYYBBBBBKYY',
+  '..KBBBBBBYYYYYYBBBBBBK..',
+  '..KBBBBBBBYYYYBBBBBBBK..',
+  '..KBBBBBBBBBBBBBBBBBBK..',
+  '..KBBBBBBBBBBBBBBBBBBK..',
+  '..KBBBBBKKKKKKKKKKKK....',
+  '...KBBBK................',
+  '....KBK.................',
+  '.....K..................',
+  '........................',
+];
+const PIXEL_COLORS: Record<string, string> = { K: '#1e40af', B: '#4ba3e3', Y: '#f5c542', D: '#2e3f9e', A: '#5b7cfa', W: '#0f172a' };
+
+/** Line-art fallback for terminals without colour, where pixel art would be a silhouette. */
+const ROBOT_ASCII = [
   '      ●      ',
   '      ┃      ',
   '  ╭───┸───╮  ',
-  ' ▐│ ◉   ◉ │▌ ',
-  '  │  ╰─╯  │  ',
-  '  ╰──┬─┬──╯  ',
-  ' ╭───┴─┴───╮ ',
-  ' │ ┌─────┐ │ ',
-  ' │ │  A  │ │ ',
-  ' ╰─┴─────┴─╯ ',
+  ' ▐│ ◠   ◉ │▌ ',
+  ' ▐│  ╰─╯  │▌ ',
+  '  │       │  ',
+  '  ╰┬──────╯  ',
+  '   ╰╯        ',
+  '             ',
+  '             ',
 ];
-const ROBOT_WIDTH = 13;
+
+const ROBOT_HEIGHT = ROBOT_PIXELS.length / 2;
+const ROBOT_WIDTH = pc.isColorSupported ? ROBOT_PIXELS[0]!.length : ROBOT_ASCII[0]!.length;
 
 const BUBBLE = ['╭────────────╮', '│ Analyze    │', '│ Understand │', '│ Document   │', '│ Empower ✦  │', '╰────────────╯'];
 const BUBBLE_WIDTH = 14;
 
 function paintRobot(): string[] {
-  return ROBOT.map((row, r) =>
-    [...row]
-      .map((ch) => {
-        if (ch === ' ') return ch;
-        if (ch === '◉') return paint(PALETTE.cyan, ch, true);
-        if (ch === '●') return paint(PALETTE.pink, ch, true);
-        if (ch === 'A') return paint(PALETTE.cyan, ch, true);
-        if (ch === '▐' || ch === '▌') return paint(PALETTE.violet, ch);
-        return paint(r < 6 ? PALETTE.blue : PALETTE.violet, ch);
-      })
-      .join(''),
-  );
+  if (!pc.isColorSupported) return ROBOT_ASCII;
+  const color = (p: string) => PIXEL_COLORS[p] ?? null;
+  const out: string[] = [];
+  for (let r = 0; r < ROBOT_PIXELS.length; r += 2) {
+    const top = ROBOT_PIXELS[r]!;
+    const bottom = ROBOT_PIXELS[r + 1]!;
+    let row = '';
+    for (let x = 0; x < top.length; x++) {
+      const [t, b] = [color(top[x]!), color(bottom[x]!)];
+      if (!t && !b) row += ' ';
+      else if (t === b) row += cell('█', t, null);
+      else if (!b) row += cell('▀', t, null);
+      else if (!t) row += cell('▄', b, null);
+      else row += cell('▀', t, b);
+    }
+    out.push(row);
+  }
+  return out;
 }
 
 function paintBubble(): string[] {
@@ -92,10 +129,10 @@ export function header(): string[] {
   const total = termWidth();
   const logoW = LOGO_WIDTH;
   const divider = (h: number) => Array.from({ length: h }, () => pc.dim(VR));
-  const robotBubble = columns([paintRobot(), vcenter(paintBubble(), ROBOT.length - 2)], [ROBOT_WIDTH, BUBBLE_WIDTH], 1);
-  const logo = vcenter(logoBlock(logoW), ROBOT.length);
-  const links = vcenter(linksBlock(), ROBOT.length);
-  const H = ROBOT.length;
+  const robotBubble = columns([paintRobot(), vcenter(paintBubble(), ROBOT_HEIGHT - 2)], [ROBOT_WIDTH, BUBBLE_WIDTH], 1);
+  const logo = vcenter(logoBlock(logoW), ROBOT_HEIGHT);
+  const links = vcenter(linksBlock(), ROBOT_HEIGHT);
+  const H = ROBOT_HEIGHT;
 
   const layouts: Array<{ w: number; build: () => string[] }> = [
     { w: ROBOT_WIDTH + 1 + BUBBLE_WIDTH + 3 + logoW + 3 + 1 + 3 + LINKS_WIDTH, build: () => columns([robotBubble, logo, divider(H), links], [ROBOT_WIDTH + 1 + BUBBLE_WIDTH, logoW, 1, LINKS_WIDTH], 3) },
