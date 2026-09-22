@@ -38,7 +38,7 @@ describe('athena CLI', () => {
     const dir = await sampleProject();
     const r = await runCli(['init'], dir);
     expect(r.code, r.stderr).toBe(0);
-    expect(r.stdout).toContain('Athena ready.');
+    expect(r.stdout).toContain('Athena is ready!');
 
     for (const d of KNOWLEDGE_DOCS) await expect(fs.access(path.join(dir, '.athena', d.file))).resolves.toBeUndefined();
     const state = JSON.parse(await read(dir, '.athena/state.json'));

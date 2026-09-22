@@ -31,6 +31,11 @@ function onSignal(): void {
   if (process.stdout.isTTY) process.stdout.write('\x1b[?25h');
   if (!ui.isJson()) process.stderr.write(`\n${ui.c.yellow('Interrupted.')} ${ui.dim(ui.getInterruptMessage())}\n`);
 }
+// `athena … | head` closes stdout early; exit quietly instead of crashing on EPIPE.
+process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') process.exit(0);
+  throw err;
+});
 process.on('SIGINT', onSignal);
 process.on('SIGTERM', onSignal);
 
