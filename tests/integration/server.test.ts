@@ -201,8 +201,11 @@ describe('analysis, agents, activity', () => {
   it('emits an event when a knowledge file changes on disk outside the UI', async () => {
     const file = path.join(root, '.athena/performance.md');
     await fs.appendFile(file, '\nMeasured p95 at 180ms.\n');
-    for (let i = 0; i < 60 && !server.events.recent().some((e) => e.type === 'knowledge.external-change'); i++) await new Promise((res) => setTimeout(res, 50));
-    const e = server.events.recent().find((x) => x.type === 'knowledge.external-change');
+    // Earlier tests write rules.md; on slow runners the watcher can report that
+    // late, so look for this file's event specifically.
+    const mine = (x: { type: string; data?: { file?: unknown } }) => x.type === 'knowledge.external-change' && x.data?.file === 'performance.md';
+    for (let i = 0; i < 100 && !server.events.recent().some(mine); i++) await new Promise((res) => setTimeout(res, 50));
+    const e = server.events.recent().find(mine);
     expect(e?.data?.file).toBe('performance.md');
     expect(e?.source).toBe('filesystem');
   });

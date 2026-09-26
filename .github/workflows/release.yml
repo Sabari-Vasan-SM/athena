@@ -9,7 +9,7 @@ name: Release
 # npm adds provenance automatically for trusted publishes.
 on:
   push:
-    tags: ['v*']
+    tags: ['v[0-9]+.[0-9]+.[0-9]+'] # release tags only, not the moving v0 Action tag
 
 permissions:
   contents: write # create the GitHub release
