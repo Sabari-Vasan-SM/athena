@@ -201,6 +201,9 @@ describe('athena CLI', () => {
     const dir = await makeProject({ '.cursor/rules/athena.mdc': 'my own rule' });
     await runCli(['init', '--agents', 'cursor'], dir);
     expect(await read(dir, '.cursor/rules/athena.mdc')).toBe('my own rule');
+    // A developer file at an Athena path is evidence the developer uses the agent.
+    const { cursorAdapter } = await import('../../src/agents/cursor/adapter.js');
+    expect((await cursorAdapter.detectPresence(dir)).evidence).toEqual(['.cursor']);
   });
 
   it('uses meaningful exit codes', async () => {
