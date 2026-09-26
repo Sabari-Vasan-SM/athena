@@ -3,6 +3,8 @@
 ## Unreleased
 
 - **Codex support**: `athena agents add codex` (also picked up by `athena init` when a `.codex/` folder exists). Athena writes its block in `AGENTS.md`, registers the MCP server in `.codex/config.toml` and installs activity hooks in `.codex/hooks.json`, keeping everything else in those files. `athena doctor` warns when Codex hasn't trusted the project yet, since Codex ignores `.codex/` until then. Athena only reads Codex's trust setting and never changes it.
+- **Windsurf support**: `athena agents add windsurf` (alias `codeium`; picked up by `athena init` when `.windsurf/` or `.windsurfrules` exists). Athena writes an owned rule at `.windsurf/rules/athena.md` with `trigger: always_on`, kept under the documented 12,000-character limit; Windsurf and Devin Desktop (its new name) read it. MCP and activity hooks are not configured: Windsurf's MCP config is per user, and Cascade hooks only apply to the legacy Cascade agent (available through July 2026).
+- **Cline support**: `athena agents add cline` (picked up by `athena init` when `.clinerules` or `.cline/` exists). Athena writes an owned rule at `.clinerules/athena.md`; if `.clinerules` is a single file, Athena leaves it alone and uses `.cline/rules/athena.md`, which Cline also reads. MCP and activity hooks are not configured: Cline's MCP settings are per user, and its hooks are SDK plugins.
 - Removing one integration no longer removes the `AGENTS.md` block that another configured integration still uses.
 
 ## 0.1.3
