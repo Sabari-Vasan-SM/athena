@@ -12,7 +12,7 @@ import { runDoctor } from '../services/doctor.js';
 import { configureAgents, listAgents, removeAgents } from '../services/agents.js';
 import { getOverview } from '../services/overview.js';
 import { runPipeline } from '../services/pipeline.js';
-import { applySync, ignorePlan, planSync, type SyncPlan } from '../services/sync.js';
+import { applySync, ignorePlan, planSync, staleForCheck, type SyncPlan } from '../services/sync.js';
 import { loadScan, runSecurityScan, saveScan, type SecurityScan } from '../services/security.js';
 import { reviewChanges } from '../services/review.js';
 import { getRelevantContext, graphSummary, refreshGraph } from '../services/context.js';
@@ -411,7 +411,7 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
 
   app.get<{ Querystring: { base?: string } }>('/api/review', async (req) => {
     const base = typeof req.query.base === 'string' && req.query.base ? req.query.base : undefined;
-    return reviewChanges(root, { base, checkSync: async (r) => (await planSync(r)).upToDate });
+    return reviewChanges(root, { base, checkSync: async (r) => staleForCheck(await planSync(r)).length === 0 });
   });
 
   // ---- context engine & graph -------------------------------------------------------------

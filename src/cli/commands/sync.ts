@@ -1,4 +1,4 @@
-import { applySync, fileChangeCount, needsIndexRefreshOnly, planSync, summarizePlan, type SyncPlan } from '../../services/sync.js';
+import { applySync, fileChangeCount, needsIndexRefreshOnly, planSync, staleForCheck, summarizePlan, type SyncPlan } from '../../services/sync.js';
 import { EXIT } from '../../services/errors.js';
 import { requireProjectRoot, type GlobalOptions } from '../context.js';
 import { confirm } from './clean.js';
@@ -85,9 +85,15 @@ export async function syncCommand(opts: SyncOptions): Promise<number> {
     throw err;
   }
 
+  const stale = staleForCheck(plan);
+  const inSync = stale.length === 0;
   if (ui.isJson() && (opts.dryRun || opts.check)) {
-    ui.json({ ...summarizePlan(plan), ...(opts.diff ? { diffs: Object.fromEntries(plan.documents.map((d) => [d.file, d.diff])) } : {}) });
-    return opts.check && !plan.upToDate ? 1 : EXIT.OK;
+    ui.json({
+      ...summarizePlan(plan),
+      ...(opts.check ? { inSync, stale: stale.map((d) => d.file) } : {}),
+      ...(opts.diff ? { diffs: Object.fromEntries(plan.documents.map((d) => [d.file, d.diff])) } : {}),
+    });
+    return opts.check && !inSync ? 1 : EXIT.OK;
   }
   if (!ui.isJson() && !ui.isQuiet()) {
     ui.heading('Athena Sync');
@@ -99,8 +105,12 @@ export async function syncCommand(opts: SyncOptions): Promise<number> {
   }
 
   if (opts.check) {
-    if (!ui.isJson()) ui.line(plan.upToDate ? ui.c.green('Knowledge is synchronized.') : ui.c.yellow('Knowledge is out of date. Run `athena sync` to review and apply.'));
-    return plan.upToDate ? EXIT.OK : 1;
+    if (!inSync) ui.line(ui.c.yellow('Knowledge is out of date. Run `athena sync` to review and apply.'));
+    else {
+      ui.line(ui.c.green('Knowledge is synchronized.'));
+      if (!plan.upToDate) ui.info(ui.dim('Only Git-history sections (change hotspots) differ; they are not checked. `athena sync` refreshes them.'));
+    }
+    return inSync ? EXIT.OK : 1;
   }
   if (opts.dryRun) {
     if (!ui.isJson()) ui.line(ui.dim('Dry run — nothing was written.'));
