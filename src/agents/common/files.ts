@@ -110,13 +110,16 @@ export async function jsonOnlyAthena(file: string): Promise<boolean> {
     return false;
   }
   // Athena's MCP registration is keyed by name rather than carrying the hook marker.
+  // `mcpServers` for most agents; VS Code's .vscode/mcp.json uses `servers`.
   const record = data as Record<string, unknown>;
-  const servers = record?.mcpServers;
   let hadAthenaMcp = false;
-  if (servers && typeof servers === 'object') {
-    hadAthenaMcp = 'athena' in (servers as Record<string, unknown>);
+  for (const key of ['mcpServers', 'servers']) {
+    const servers = record?.[key];
+    if (!servers || typeof servers !== 'object' || Array.isArray(servers)) continue;
+    if (!('athena' in (servers as Record<string, unknown>))) continue;
+    hadAthenaMcp = true;
     delete (servers as Record<string, unknown>).athena;
-    if (Object.keys(servers as Record<string, unknown>).length === 0) delete record.mcpServers;
+    if (Object.keys(servers as Record<string, unknown>).length === 0) delete record[key];
   }
   if (!text.includes(ATHENA_MARK) && !hadAthenaMcp) return false;
   const strip = (value: unknown): unknown => {
@@ -132,7 +135,7 @@ export async function jsonOnlyAthena(file: string): Promise<boolean> {
           if (cleaned !== undefined) out[k] = cleaned;
           continue;
         }
-        if (k === 'version') continue; // written by Athena for Cursor's hooks.json
+        if (k === 'version') continue; // written by Athena for Cursor's and Copilot's hooks files
         out[k] = v;
       }
       return Object.keys(out).length ? out : undefined;

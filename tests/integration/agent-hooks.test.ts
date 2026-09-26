@@ -10,6 +10,10 @@ import { normalizeHookEvent } from '../../src/agents/common/hook-events.js';
 import { claudeCodeAdapter } from '../../src/agents/claude-code/adapter.js';
 import { cursorAdapter } from '../../src/agents/cursor/adapter.js';
 import { codexAdapter } from '../../src/agents/codex/adapter.js';
+import { copilotAdapter } from '../../src/agents/copilot/adapter.js';
+import { geminiCliAdapter } from '../../src/agents/gemini-cli/adapter.js';
+import { antigravityAdapter } from '../../src/agents/antigravity/adapter.js';
+import { resolveAdapters } from '../../src/agents/registry.js';
 import { removeAgents, configureAgents } from '../../src/services/agents.js';
 import { applyChanges } from '../../src/agents/registry.js';
 import { CLI, cleanupProjects, FAKE, makeProject } from '../helpers.js';
@@ -67,6 +71,20 @@ describe('hook payload normalization', () => {
     expect(ev('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'cargo test' } })).toMatchObject({ kind: 'command', state: 'TESTING' });
     expect(ev('PreToolUse', { tool_name: 'update_plan', tool_input: {} })).toMatchObject({ state: 'PLANNING' });
     expect(ev('SessionStart', { session_id: 'x1' })).toMatchObject({ kind: 'session-start', session: 'x1' });
+  });
+
+  it('maps Gemini CLI hooks and built-in tool names', () => {
+    const ev = (hook: string, payload: Record<string, unknown>) => normalizeHookEvent('gemini-cli', hook, payload);
+    expect(ev('SessionStart', { session_id: 'g1', source: 'startup' })).toMatchObject({ kind: 'session-start', session: 'g1' });
+    expect(ev('BeforeAgent', { prompt: 'add billing' })).toMatchObject({ kind: 'prompt', state: 'PLANNING' });
+    expect(JSON.stringify(ev('BeforeAgent', { prompt: 'secret plan' }))).not.toContain('secret plan');
+    expect(ev('BeforeTool', { tool_name: 'read_file', tool_input: { file_path: 'src/a.ts' } })).toMatchObject({ kind: 'read', state: 'ANALYZING', files: ['src/a.ts'] });
+    expect(ev('BeforeTool', { tool_name: 'grep_search', tool_input: {} })).toMatchObject({ kind: 'search' });
+    expect(ev('BeforeTool', { tool_name: 'replace', tool_input: { file_path: 'src/a.ts' } })).toMatchObject({ kind: 'edit', state: 'CODING' });
+    expect(ev('BeforeTool', { tool_name: 'write_file', tool_input: { file_path: 'src/b.ts' } })).toMatchObject({ kind: 'edit' });
+    expect(ev('BeforeTool', { tool_name: 'run_shell_command', tool_input: { command: 'npm test' } })).toMatchObject({ kind: 'command', state: 'TESTING' });
+    expect(ev('AfterTool', { tool_name: 'replace' })).toBeNull();
+    expect(ev('AfterAgent', {})).toMatchObject({ kind: 'stop', state: 'SUCCESS' });
   });
 
   it('never records agent reasoning, only tool facts', () => {
@@ -216,6 +234,124 @@ describe('hook installation', () => {
     await expect(fs.access(path.join(dir, '.codex/hooks.json'))).rejects.toThrow();
     await removeAgents(dir, ['agents-md']);
     await expect(fs.access(path.join(dir, 'AGENTS.md'))).rejects.toThrow();
+  });
+
+  it('installs GitHub Copilot instructions, MCP and hooks without touching existing files', async () => {
+    const dir = await project();
+    const userInstructions = '# Team\n\nUse pnpm.\n';
+    const userMcp = JSON.stringify({ inputs: [{ id: 'tok', type: 'promptString' }], servers: { github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' } } }, null, 2);
+    const userHooks = JSON.stringify({ version: 1, hooks: { preToolUse: [{ type: 'command', bash: './audit.sh' }] } }, null, 2);
+    await fs.mkdir(path.join(dir, '.github/hooks'), { recursive: true });
+    await fs.mkdir(path.join(dir, '.vscode'), { recursive: true });
+    await fs.writeFile(path.join(dir, '.github/copilot-instructions.md'), userInstructions);
+    await fs.writeFile(path.join(dir, '.vscode/mcp.json'), userMcp);
+    await fs.writeFile(path.join(dir, '.github/hooks/team.json'), userHooks);
+
+    await applyChanges(dir, await copilotAdapter.plan({ root: dir, projectName: 'shop' }));
+    const instructions = await fs.readFile(path.join(dir, '.github/copilot-instructions.md'), 'utf8');
+    expect(instructions.startsWith(userInstructions)).toBe(true);
+    expect(instructions).toContain('<!-- athena:start -->');
+    const mcp = JSON.parse(await fs.readFile(path.join(dir, '.vscode/mcp.json'), 'utf8'));
+    expect(mcp.servers.github).toEqual({ type: 'http', url: 'https://api.githubcopilot.com/mcp/' });
+    expect(mcp.servers.athena).toEqual({ type: 'stdio', command: 'athena', args: ['mcp'] });
+    expect(mcp.inputs).toHaveLength(1);
+    expect(mcp.mcpServers).toBeUndefined();
+    const hooks = JSON.parse(await fs.readFile(path.join(dir, '.github/hooks/athena.json'), 'utf8'));
+    expect(hooks.version).toBe(1);
+    expect(Object.keys(hooks.hooks)).toEqual(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop']);
+    expect(hooks.hooks.PreToolUse[0]).toMatchObject({ type: 'command', timeoutSec: 10 });
+    // A missing `athena` must never deny a Copilot tool call: commands always exit 0.
+    expect(hooks.hooks.PreToolUse[0].bash).toBe('athena event --athena-hook --agent copilot --hook PreToolUse 2>/dev/null || true');
+    expect(hooks.hooks.PreToolUse[0].powershell).toMatch(/--agent copilot --hook PreToolUse .*; exit 0$/);
+    expect(await fs.readFile(path.join(dir, '.github/hooks/team.json'), 'utf8')).toBe(userHooks);
+    if (process.platform !== 'win32') {
+      const r = await new Promise<number>((resolve) => execFile('sh', ['-c', 'PATH=/nonexistent; ' + hooks.hooks.PreToolUse[0].bash], (err) => resolve(err ? 1 : 0)));
+      expect(r).toBe(0);
+    }
+
+    // Idempotent
+    expect((await copilotAdapter.plan({ root: dir, projectName: 'shop' })).every((c) => c.action === 'unchanged')).toBe(true);
+    expect((await copilotAdapter.check(dir)).every((c) => c.ok)).toBe(true);
+    expect(await copilotAdapter.detectPresence(dir)).toMatchObject({ detectedInProject: true });
+
+    const touched = await copilotAdapter.remove(dir);
+    expect(touched.sort()).toEqual(['.github/copilot-instructions.md', '.github/hooks/athena.json', '.vscode/mcp.json']);
+    expect(await fs.readFile(path.join(dir, '.github/copilot-instructions.md'), 'utf8')).toBe(userInstructions);
+    expect(JSON.parse(await fs.readFile(path.join(dir, '.vscode/mcp.json'), 'utf8'))).toEqual(JSON.parse(userMcp));
+    await expect(fs.access(path.join(dir, '.github/hooks/athena.json'))).rejects.toThrow();
+    expect(await fs.readFile(path.join(dir, '.github/hooks/team.json'), 'utf8')).toBe(userHooks);
+  });
+
+  it('deletes the Copilot files it created and refuses malformed .vscode/mcp.json', async () => {
+    const dir = await project();
+    await applyChanges(dir, await copilotAdapter.plan({ root: dir, projectName: 'shop' }));
+    expect((await copilotAdapter.detectPresence(dir)).evidence).toEqual([]);
+    await copilotAdapter.remove(dir);
+    for (const f of ['.github/copilot-instructions.md', '.vscode/mcp.json', '.github/hooks/athena.json', '.github/hooks', '.vscode']) await expect(fs.access(path.join(dir, f)), f).rejects.toThrow();
+
+    await fs.mkdir(path.join(dir, '.vscode'), { recursive: true });
+    await fs.writeFile(path.join(dir, '.vscode/mcp.json'), '{ "servers": { ');
+    await expect(copilotAdapter.plan({ root: dir, projectName: 'shop' })).rejects.toThrow(/not valid JSON/);
+    expect(await copilotAdapter.detectPresence(dir)).toMatchObject({ evidence: ['.vscode/mcp.json'] });
+  });
+
+  it('detects Copilot from developer files only', async () => {
+    const dir = await project();
+    expect((await copilotAdapter.detectPresence(dir)).detectedInProject).toBe(false);
+    await fs.mkdir(path.join(dir, '.github/instructions'), { recursive: true });
+    await fs.writeFile(path.join(dir, '.github/instructions/ts.instructions.md'), '---\napplyTo: "**/*.ts"\n---\nUse strict mode.\n');
+    expect((await copilotAdapter.detectPresence(dir)).evidence).toEqual(['.github/instructions']);
+  });
+
+  it('installs Gemini CLI context, MCP and hooks without touching existing settings', async () => {
+    const dir = await project();
+    const userContext = '# Gemini notes\n\nPrefer small diffs.\n';
+    const userSettings = { theme: 'GitHub', mcpServers: { docs: { command: 'docs-mcp', args: [] } }, hooks: { BeforeTool: [{ matcher: 'write_file', hooks: [{ name: 'guard', type: 'command', command: './guard.sh' }] }] } };
+    await fs.mkdir(path.join(dir, '.gemini'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'GEMINI.md'), userContext);
+    await fs.writeFile(path.join(dir, '.gemini/settings.json'), JSON.stringify(userSettings, null, 2));
+
+    await applyChanges(dir, await geminiCliAdapter.plan({ root: dir, projectName: 'shop' }));
+    const context = await fs.readFile(path.join(dir, 'GEMINI.md'), 'utf8');
+    expect(context.startsWith(userContext)).toBe(true);
+    expect(context).toContain('<!-- athena:start -->');
+    const settings = JSON.parse(await fs.readFile(path.join(dir, '.gemini/settings.json'), 'utf8'));
+    expect(settings.theme).toBe('GitHub');
+    expect(settings.mcpServers.docs).toEqual({ command: 'docs-mcp', args: [] });
+    expect(settings.mcpServers.athena).toEqual({ command: 'athena', args: ['mcp'] });
+    expect(Object.keys(settings.hooks)).toEqual(['BeforeTool', 'SessionStart', 'BeforeAgent', 'AfterAgent', 'SessionEnd']);
+    expect(settings.hooks.BeforeTool).toHaveLength(2);
+    expect(settings.hooks.BeforeTool[0].matcher).toBe('write_file');
+    expect(settings.hooks.BeforeTool[1]).toMatchObject({ matcher: '*' });
+    expect(settings.hooks.BeforeTool[1].hooks[0]).toEqual({ name: 'athena-activity', type: 'command', command: 'athena event --athena-hook --agent gemini-cli --hook BeforeTool', timeout: 10_000 });
+
+    expect((await geminiCliAdapter.plan({ root: dir, projectName: 'shop' })).every((c) => c.action === 'unchanged')).toBe(true);
+    expect((await geminiCliAdapter.check(dir)).every((c) => c.ok)).toBe(true);
+    expect((await geminiCliAdapter.detectPresence(dir)).evidence).toEqual(['GEMINI.md', '.gemini']);
+
+    expect((await geminiCliAdapter.remove(dir)).sort()).toEqual(['.gemini/settings.json', 'GEMINI.md']);
+    expect(await fs.readFile(path.join(dir, 'GEMINI.md'), 'utf8')).toBe(userContext);
+    expect(JSON.parse(await fs.readFile(path.join(dir, '.gemini/settings.json'), 'utf8'))).toEqual(userSettings);
+  });
+
+  it('deletes the Gemini CLI files it created and refuses malformed settings', async () => {
+    const dir = await project();
+    await applyChanges(dir, await geminiCliAdapter.plan({ root: dir, projectName: 'shop' }));
+    expect((await geminiCliAdapter.detectPresence(dir)).evidence).toEqual([]);
+    await geminiCliAdapter.remove(dir);
+    for (const f of ['GEMINI.md', '.gemini']) await expect(fs.access(path.join(dir, f)), f).rejects.toThrow();
+
+    await fs.mkdir(path.join(dir, '.gemini'), { recursive: true });
+    await fs.writeFile(path.join(dir, '.gemini/settings.json'), '{ "theme": ');
+    await expect(geminiCliAdapter.plan({ root: dir, projectName: 'shop' })).rejects.toThrow(/not valid JSON/);
+  });
+
+  it('treats GEMINI.md as Gemini CLI evidence, not Antigravity', async () => {
+    const dir = await project();
+    await fs.writeFile(path.join(dir, 'GEMINI.md'), '# notes\n');
+    expect((await geminiCliAdapter.detectPresence(dir)).evidence).toEqual(['GEMINI.md']);
+    expect((await antigravityAdapter.detectPresence(dir)).evidence).toEqual([]);
+    expect(resolveAdapters(['gemini', 'github-copilot', 'gh-copilot', 'antigravity']).map((a) => a.id)).toEqual(['gemini-cli', 'copilot', 'antigravity']);
   });
 
   it('refuses to touch malformed agent config', async () => {

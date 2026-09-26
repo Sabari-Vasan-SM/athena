@@ -3,6 +3,9 @@
 ## Unreleased
 
 - **Codex support**: `athena agents add codex` (also picked up by `athena init` when a `.codex/` folder exists). Athena writes its block in `AGENTS.md`, registers the MCP server in `.codex/config.toml` and installs activity hooks in `.codex/hooks.json`, keeping everything else in those files. `athena doctor` warns when Codex hasn't trusted the project yet, since Codex ignores `.codex/` until then. Athena only reads Codex's trust setting and never changes it.
+- **GitHub Copilot support**: `athena agents add copilot` (aliases `github-copilot`, `gh-copilot`). Athena writes a marked block in `.github/copilot-instructions.md`, registers the MCP server under `servers` in `.vscode/mcp.json`, and installs activity hooks in its own `.github/hooks/athena.json` (read by Copilot CLI and VS Code). Hook commands always exit 0, because Copilot denies a tool call when a pre-tool hook fails. `athena init` detects Copilot from `.github/copilot-instructions.md`, `.github/instructions/`, `.github/hooks/` or a `.vscode/mcp.json` Athena didn't create.
+- **Gemini CLI support**: `athena agents add gemini-cli`. Athena writes a marked block in `GEMINI.md`, and adds the `athena` MCP server and activity hooks (`SessionStart`, `BeforeAgent`, `BeforeTool`, `AfterAgent`, `SessionEnd`) to `.gemini/settings.json`, keeping everything else in those files.
+- `gemini` now selects Gemini CLI rather than Antigravity, and a `GEMINI.md` file no longer counts as evidence of Antigravity. `GEMINI.md` is Gemini CLI's context file; Antigravity also reads it, but so do other tools, so only `.agents/` or `.agent/` mean Antigravity is in use.
 - Removing one integration no longer removes the `AGENTS.md` block that another configured integration still uses.
 
 ## 0.1.3

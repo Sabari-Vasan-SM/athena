@@ -10,7 +10,7 @@ Status legend: ✅ done · 🔜 next · 📋 planned
 - ✅ Provenance model (`FACT`/`DETECTED`/`INFERRED`/`UNKNOWN`)
 - ✅ 12 knowledge documents with managed blocks and developer notes; `rules.md` round-trip
 - ✅ `state.json` with a file index and change detection; impact mapping for `status`
-- ✅ Agent adapters: Claude Code, Cursor, Codex, Antigravity, AGENTS.md
+- ✅ Agent adapters: Claude Code, Cursor, Codex, GitHub Copilot, Gemini CLI, Antigravity, AGENTS.md
 - ✅ Tests: unit, analyzer integration, CLI end-to-end, interruption, a 20k-file scale test, module boundaries
 
 **Known Phase 1 limitations**
@@ -70,6 +70,8 @@ Status legend: ✅ done · 🔜 next · 📋 planned
 
 **Known Phase 4 limitations**
 - Antigravity publishes no hook mechanism, so its activity is reported as unsupported.
+- GitHub Copilot's MCP registration covers VS Code (`.vscode/mcp.json`) only; VS Code hooks are in Preview. Copilot cloud agent also runs `.github/hooks/*.json` from the default branch, where Athena's hook commands are harmless no-ops.
+- `.vscode/mcp.json` and `.gemini/settings.json` must be strict JSON; files with comments are refused rather than rewritten.
 - The Cursor forwarding script is generated for the current platform (`.sh` or `.cmd`); a repo shared across platforms needs a re-run of `athena agents add cursor`.
 - Athena cannot tell whether an agent is running when no hook has fired, and it never sees reasoning or plans.
 - Hooks require `athena` on PATH (or `ATHENA_HOOK_COMMAND`); doctor warns when it is not.

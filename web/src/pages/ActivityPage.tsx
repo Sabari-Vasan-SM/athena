@@ -78,7 +78,7 @@ export function ActivityPage() {
         }
       >
         {filter === 'agent' && !shown.length ? (
-          <div className="events-empty">No agent events recorded yet. Configure Claude Code, Cursor or Codex on the AI Agents page, then start a session.</div>
+          <div className="events-empty">No agent events recorded yet. Configure Claude Code, Cursor, Codex, GitHub Copilot or Gemini CLI on the AI Agents page, then start a session.</div>
         ) : (
           <EventList events={shown} />
         )}
