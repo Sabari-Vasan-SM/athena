@@ -34,7 +34,7 @@ export async function activityCommand(opts: ActivityOptions): Promise<void> {
     const agents = await listAgents(root);
     const reporting = agents.filter((a) => a.activityObservation === 'hooks');
     ui.line(ui.dim('No agent activity recorded yet.'));
-    ui.line(ui.dim(reporting.length ? `Hooks are installed for: ${reporting.map((a) => a.name).join(', ')}. Events appear once an agent runs in this project.` : 'Install hooks with `athena agents add claude-code` (or cursor) to record agent activity.'));
+    ui.line(ui.dim(reporting.length ? `Hooks are installed for: ${reporting.map((a) => a.name).join(', ')}. Events appear once an agent runs in this project.` : 'Install hooks with `athena agents add claude-code` (or cursor, codex) to record agent activity.'));
     return;
   }
   for (const e of events) {

@@ -97,6 +97,7 @@ Each adapter uses the agent's own documented mechanism:
 |---|---|---|
 | Claude Code | `CLAUDE.md` block with `@.athena/rules.md` import | Marked block in a user file |
 | Cursor | `.cursor/rules/athena.mdc` (`alwaysApply: true`) | Athena-owned file |
+| Codex | `AGENTS.md` block; `[mcp_servers.athena]` between `# athena:start`/`# athena:end` in `.codex/config.toml`; entries in `.codex/hooks.json` | Marked blocks/entries in user files |
 | Antigravity | `.agents/rules/athena.md` (12,000-character limit) | Athena-owned file |
 | AGENTS.md | Marked block (cross-tool convention) | Marked block in a user file |
 

@@ -6,13 +6,14 @@ import { resolveInside } from '../core/util/paths.js';
 import { claudeCodeAdapter } from './claude-code/adapter.js';
 import { cursorAdapter } from './cursor/adapter.js';
 import { antigravityAdapter } from './antigravity/adapter.js';
+import { codexAdapter } from './codex/adapter.js';
 import { agentsMdAdapter } from './agents-md/adapter.js';
 
-export const ADAPTERS: AgentAdapter[] = [claudeCodeAdapter, cursorAdapter, antigravityAdapter, agentsMdAdapter];
+export const ADAPTERS: AgentAdapter[] = [claudeCodeAdapter, cursorAdapter, codexAdapter, antigravityAdapter, agentsMdAdapter];
 
 /** Accepts ids and friendly aliases. */
 export function resolveAdapters(names: string[]): AgentAdapter[] {
-  const alias: Record<string, string> = { claude: 'claude-code', claudecode: 'claude-code', agents: 'agents-md', 'agents.md': 'agents-md', gemini: 'antigravity' };
+  const alias: Record<string, string> = { claude: 'claude-code', claudecode: 'claude-code', agents: 'agents-md', 'agents.md': 'agents-md', gemini: 'antigravity', 'openai-codex': 'codex', 'codex-cli': 'codex' };
   const out: AgentAdapter[] = [];
   for (const raw of names) {
     const n = raw.trim().toLowerCase();

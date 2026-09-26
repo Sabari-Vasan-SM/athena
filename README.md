@@ -2,7 +2,7 @@
 
 **Project intelligence for AI coding agents.**
 
-Athena analyzes your repository and maintains a structured, human-readable understanding of it in `.athena/`: architecture, database, API, auth, security, testing, deployment, and your own project rules. It then points Claude Code, Cursor, Antigravity and other agents at that knowledge, so they plan and change code with real project context.
+Athena analyzes your repository and maintains a structured, human-readable understanding of it in `.athena/`: architecture, database, API, auth, security, testing, deployment, and your own project rules. It then points Claude Code, Cursor, Codex, Antigravity and other agents at that knowledge, so they plan and change code with real project context.
 
 Athena doesn't replace your coding agent, and it doesn't claim to make code bug-free or secure. It makes agents more **project-aware**, and it is honest about what it knows.
 
@@ -111,6 +111,7 @@ Athena configures hooks for agents that support them, so it can show what they a
 |---|---|
 | Claude Code | Hooks in `.claude/settings.json` running `athena event` (async, so the agent is never blocked) |
 | Cursor | Hooks in `.cursor/hooks.json` plus a small forwarding script |
+| Codex | Hooks in `.codex/hooks.json` running `athena event` (Codex loads them only for trusted projects) |
 | Antigravity | No documented hook mechanism — activity is reported as unavailable |
 
 Hooks append events to `.athena/.agent-events.jsonl` (gitignored, rotated, no network). The UI tails that file, so activity shows up live and history survives with the UI closed.
@@ -154,7 +155,7 @@ Documents to read
 - **Sections, not whole files.** Only the relevant sections are returned, under a character budget, with your rules always included.
 - **Project graph.** `athena graph --build` writes `.athena/graph.json`: packages, files, routes, entities, frameworks and commands, connected by `contains`, `imports`, `handles`, `defines` and `depends_on`. It comes from the analysis, so it never asserts more than DETECTED evidence.
 
-**MCP.** `athena mcp` serves this to any MCP-capable agent over stdio, and `athena agents add` registers it (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor). Tools: `get_relevant_context`, `get_project_context`, `get_architecture`, `get_database_schema`, `get_api_context`, `get_security_context`, `get_project_rules`, `get_knowledge_document`, `get_project_changes`, `get_project_graph`, `get_athena_status`, `update_knowledge`.
+**MCP.** `athena mcp` serves this to any MCP-capable agent over stdio, and `athena agents add` registers it (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor, `[mcp_servers.athena]` in `.codex/config.toml` for Codex). Tools: `get_relevant_context`, `get_project_context`, `get_architecture`, `get_database_schema`, `get_api_context`, `get_security_context`, `get_project_rules`, `get_knowledge_document`, `get_project_changes`, `get_project_graph`, `get_athena_status`, `update_knowledge`.
 
 The server is **read-only by default**: `update_knowledge` reports what would change and refuses to write unless you start it with `--allow-write`.
 
@@ -209,6 +210,7 @@ Security: the server binds to `127.0.0.1` only, on the first free port from 7432
 |---|---|
 | Claude Code | A marked block in `CLAUDE.md` that imports `.athena/rules.md` |
 | Cursor | `.cursor/rules/athena.mdc` (always applied) |
+| Codex | The marked block in `AGENTS.md` (which Codex reads), plus `.codex/config.toml` and `.codex/hooks.json`. Codex ignores `.codex/` until you trust the project; `athena doctor` tells you if it isn't trusted yet |
 | Antigravity | `.agents/rules/athena.md` (set to *Always On* in Antigravity if needed) |
 | Others | A marked block in `AGENTS.md` |
 

@@ -10,7 +10,7 @@ Status legend: ✅ done · 🔜 next · 📋 planned
 - ✅ Provenance model (`FACT`/`DETECTED`/`INFERRED`/`UNKNOWN`)
 - ✅ 12 knowledge documents with managed blocks and developer notes; `rules.md` round-trip
 - ✅ `state.json` with a file index and change detection; impact mapping for `status`
-- ✅ Agent adapters: Claude Code, Cursor, Antigravity, AGENTS.md
+- ✅ Agent adapters: Claude Code, Cursor, Codex, Antigravity, AGENTS.md
 - ✅ Tests: unit, analyzer integration, CLI end-to-end, interruption, a 20k-file scale test, module boundaries
 
 **Known Phase 1 limitations**
