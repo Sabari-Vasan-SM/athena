@@ -4,7 +4,7 @@
 
 🌐 **Website & docs:** [athena.sabari.me](https://athena.sabari.me) · 📦 [npm](https://www.npmjs.com/package/project-athena) · [Changelog](CHANGELOG.md)
 
-Athena analyzes your repository and maintains a structured, human-readable understanding of it in `.athena/`: architecture, database, API, auth, security, testing, deployment, and your own project rules. It then points Claude Code, Cursor, Codex, Antigravity and other agents at that knowledge, so they plan and change code with real project context.
+Athena analyzes your repository and maintains a structured, human-readable understanding of it in `.athena/`: architecture, database, API, auth, security, testing, deployment, and your own project rules. It then points Claude Code, Cursor, Codex, GitHub Copilot, Gemini CLI, Antigravity, Windsurf, Cline and other agents at that knowledge, so they plan and change code with real project context.
 
 Athena doesn't replace your coding agent, and it doesn't claim to make code bug-free or secure. It makes agents more **project-aware**, and it is honest about what it knows.
 
@@ -59,7 +59,7 @@ Generated content sits between `athena:generated` markers. Anything outside the 
 | `athena watch` | Watch the project and propose updates as files change (`--auto-apply` to write automatically) |
 | `athena doctor` | Check the installation, project, knowledge files and agent integrations |
 | `athena rules` | `list`, `add "<rule>" --section <name>`, `edit`, `enable`, `disable`, `remove` |
-| `athena agents` | `list`, `add <claude-code\|cursor\|codex\|antigravity\|windsurf\|cline\|agents-md\|all>`, `remove` |
+| `athena agents` | `list`, `add <claude-code\|cursor\|codex\|copilot\|gemini-cli\|antigravity\|windsurf\|cline\|agents-md\|all>`, `remove` |
 | `athena activity` | Show AI agent activity observed through hooks (`-n`, `--agent`) |
 | `athena security` | Audit dependencies with the tools installed for this project, and report secret findings (`--fail-on`, `--last`, `--no-audit`) |
 | `athena review` | Check the current diff for facts worth reviewing, and list your rules and checklist (`--base`, `--no-fail`) |
@@ -114,6 +114,8 @@ Athena configures hooks for agents that support them, so it can show what they a
 | Claude Code | Hooks in `.claude/settings.json` running `athena event` (async, so the agent is never blocked) |
 | Cursor | Hooks in `.cursor/hooks.json` plus a small forwarding script |
 | Codex | Hooks in `.codex/hooks.json` running `athena event` (Codex loads them only for trusted projects) |
+| GitHub Copilot | Hooks in `.github/hooks/athena.json` running `athena event` (read by Copilot CLI and VS Code, where hooks are in Preview). Each command always exits 0, so a machine without Athena — such as Copilot cloud agent — is never blocked |
+| Gemini CLI | Hooks in `.gemini/settings.json` running `athena event` (Gemini CLI warns once when it sees new project hooks) |
 | Antigravity | No documented hook mechanism — activity is reported as unavailable |
 | Windsurf | Not installed: Cascade hooks applied only to the legacy Cascade agent, which Devin Desktop (Windsurf's new name) kept available only through July 2026 — activity is reported as unavailable |
 | Cline | Not installed: Cline's hooks are SDK plugins (TypeScript) that don't run in the IDE extensions — activity is reported as unavailable |
@@ -159,7 +161,7 @@ Documents to read
 - **Sections, not whole files.** Only the relevant sections are returned, under a character budget, with your rules always included.
 - **Project graph.** `athena graph --build` writes `.athena/graph.json`: packages, files, routes, entities, frameworks and commands, connected by `contains`, `imports`, `handles`, `defines` and `depends_on`. It comes from the analysis, so it never asserts more than DETECTED evidence.
 
-**MCP.** `athena mcp` serves this to any MCP-capable agent over stdio, and `athena agents add` registers it (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor, `[mcp_servers.athena]` in `.codex/config.toml` for Codex). Tools: `get_relevant_context`, `get_project_context`, `get_architecture`, `get_database_schema`, `get_api_context`, `get_security_context`, `get_project_rules`, `get_knowledge_document`, `get_project_changes`, `get_project_graph`, `get_athena_status`, `update_knowledge`.
+**MCP.** `athena mcp` serves this to any MCP-capable agent over stdio, and `athena agents add` registers it (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor, `[mcp_servers.athena]` in `.codex/config.toml` for Codex, `servers.athena` in `.vscode/mcp.json` for GitHub Copilot in VS Code, `mcpServers.athena` in `.gemini/settings.json` for Gemini CLI). Tools: `get_relevant_context`, `get_project_context`, `get_architecture`, `get_database_schema`, `get_api_context`, `get_security_context`, `get_project_rules`, `get_knowledge_document`, `get_project_changes`, `get_project_graph`, `get_athena_status`, `update_knowledge`.
 
 The server is **read-only by default**: `update_knowledge` reports what would change and refuses to write unless you start it with `--allow-write`.
 
@@ -215,6 +217,8 @@ Security: the server binds to `127.0.0.1` only, on the first free port from 7432
 | Claude Code | A marked block in `CLAUDE.md` that imports `.athena/rules.md` |
 | Cursor | `.cursor/rules/athena.mdc` (always applied) |
 | Codex | The marked block in `AGENTS.md` (which Codex reads), plus `.codex/config.toml` and `.codex/hooks.json`. Codex ignores `.codex/` until you trust the project; `athena doctor` tells you if it isn't trusted yet |
+| GitHub Copilot | A marked block in `.github/copilot-instructions.md`, the `athena` server in `.vscode/mcp.json`, and `.github/hooks/athena.json` |
+| Gemini CLI | A marked block in `GEMINI.md`, plus the `athena` MCP server and hooks in `.gemini/settings.json`. If you enabled Gemini CLI's folder trust, trust the project, or it ignores `.gemini/settings.json` |
 | Antigravity | `.agents/rules/athena.md` (set to *Always On* in Antigravity if needed) |
 | Windsurf | `.windsurf/rules/athena.md` (`trigger: always_on`, under the 12,000-character limit), read by Windsurf and Devin Desktop. MCP is per-user in Windsurf, so add `athena mcp` to your `mcp_config.json` yourself |
 | Cline | `.clinerules/athena.md`, or `.cline/rules/athena.md` if `.clinerules` is a single file (Athena never touches that file). MCP is per-user in Cline, so add `athena mcp` in Cline's MCP settings yourself |

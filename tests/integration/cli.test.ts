@@ -166,6 +166,11 @@ describe('athena CLI', () => {
     await runCli(['init', '--agents', 'all'], dir);
     expect(await read(dir, '.cursor/rules/athena.mdc')).toMatch(/^---\n[\s\S]*alwaysApply: true/);
     expect(await read(dir, '.codex/config.toml')).toContain('[mcp_servers.athena]');
+    expect(await read(dir, '.github/copilot-instructions.md')).toContain('<!-- athena:start -->');
+    expect(JSON.parse(await read(dir, '.vscode/mcp.json')).servers.athena).toMatchObject({ command: 'athena', args: ['mcp'] });
+    expect(await read(dir, '.github/hooks/athena.json')).toContain('--athena-hook');
+    expect(await read(dir, 'GEMINI.md')).toContain('<!-- athena:start -->');
+    expect(JSON.parse(await read(dir, '.gemini/settings.json')).mcpServers.athena).toMatchObject({ args: ['mcp'] });
     const ag = await read(dir, '.agents/rules/athena.md');
     expect(ag.length).toBeLessThan(12_000);
     const ws = await read(dir, '.windsurf/rules/athena.md');
@@ -187,6 +192,9 @@ describe('athena CLI', () => {
     await expect(fs.access(path.join(dir, '.codex/hooks.json'))).rejects.toThrow();
     await expect(fs.access(path.join(dir, '.windsurf/rules/athena.md'))).rejects.toThrow();
     await expect(fs.access(path.join(dir, '.clinerules/athena.md'))).rejects.toThrow();
+    for (const f of ['.github/copilot-instructions.md', '.vscode/mcp.json', '.github/hooks/athena.json', 'GEMINI.md', '.gemini/settings.json']) {
+      await expect(fs.access(path.join(dir, f)), f).rejects.toThrow();
+    }
   });
 
   it('does not overwrite a user file at an Athena-owned path', async () => {
@@ -239,6 +247,8 @@ describe('agent presence detection', () => {
     expect(byId['codex']).toEqual([]);
     expect(byId['windsurf']).toEqual([]);
     expect(byId['cline']).toEqual([]);
+    expect(byId['copilot']).toEqual([]);
+    expect(byId['gemini-cli']).toEqual([]);
     await fs.writeFile(path.join(dir, '.codex/config.toml'), `model = "gpt-5"\n\n${await read(dir, '.codex/config.toml')}`);
     expect(await ADAPTERS.find((a) => a.id === 'codex')!.detectPresence(dir)).toMatchObject({ detectedInProject: true, evidence: ['.codex'] });
   });

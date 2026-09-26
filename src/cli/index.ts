@@ -72,7 +72,7 @@ export function buildProgram(): Command {
   program
     .command('init')
     .description('Analyze the project and create .athena/ knowledge')
-    .option('--agents <list>', 'Agents to configure: comma-separated ids (claude-code, cursor, codex, antigravity, windsurf, cline, agents-md), "all" or "none". Default: detected agents + AGENTS.md')
+    .option('--agents <list>', 'Agents to configure: comma-separated ids (claude-code, cursor, codex, copilot, gemini-cli, antigravity, windsurf, cline, agents-md), "all" or "none". Default: detected agents + AGENTS.md')
     .option('--no-agents', 'Do not configure any agent integration')
     .option('--dry-run', 'Analyze and show what would be written, without writing')
     .action(
@@ -178,7 +178,7 @@ export function buildProgram(): Command {
 
   const agents = program.command('agents').description('Manage AI agent integrations');
   agents.command('list', { isDefault: true }).description('Show supported agents and integration status').action(run(async (_o: unknown, cmd: Command) => agentsListCommand(globals(cmd))));
-  agents.command('add <agents...>').description('Configure integrations (claude-code, cursor, codex, antigravity, windsurf, cline, agents-md, or "all")').action(run(async (names: string[], _o: unknown, cmd: Command) => agentsAddCommand(names, globals(cmd))));
+  agents.command('add <agents...>').description('Configure integrations (claude-code, cursor, codex, copilot, gemini-cli, antigravity, windsurf, cline, agents-md, or "all")').action(run(async (names: string[], _o: unknown, cmd: Command) => agentsAddCommand(names, globals(cmd))));
   agents.command('remove <agents...>').description('Remove Athena-managed integration files/blocks').action(run(async (names: string[], _o: unknown, cmd: Command) => agentsRemoveCommand(names, globals(cmd))));
 
   program

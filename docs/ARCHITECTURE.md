@@ -36,7 +36,7 @@ src/
 │   └── agents/adapter.ts      # AgentAdapter interface only
 ├── ai/                        # AIProvider interface + anthropic/openai/google/ollama
 ├── mcp/                       # MCP server (stdio) exposing context to agents
-├── agents/                    # adapters: claude-code, cursor, codex, antigravity, windsurf, cline, agents-md
+├── agents/                    # adapters: claude-code, cursor, codex, copilot, gemini-cli, antigravity, windsurf, cline, agents-md
 ├── services/                  # use cases shared by CLI and server: pipeline, status, doctor,
 │                              # knowledge (read/save/search/history), rules, agents, overview
 ├── server/                    # Fastify app, security guard, event bus, static allowlist, instance lifecycle
@@ -98,6 +98,8 @@ Each adapter uses the agent's own documented mechanism:
 | Claude Code | `CLAUDE.md` block with `@.athena/rules.md` import | Marked block in a user file |
 | Cursor | `.cursor/rules/athena.mdc` (`alwaysApply: true`) | Athena-owned file |
 | Codex | `AGENTS.md` block; `[mcp_servers.athena]` between `# athena:start`/`# athena:end` in `.codex/config.toml`; entries in `.codex/hooks.json` | Marked blocks/entries in user files |
+| GitHub Copilot | `.github/copilot-instructions.md` block; `servers.athena` in `.vscode/mcp.json`; `.github/hooks/athena.json` (commands always exit 0) | Marked block/entries in user files; Athena-named hooks file |
+| Gemini CLI | `GEMINI.md` block; `mcpServers.athena` and marked `hooks` entries in `.gemini/settings.json` | Marked block/entries in user files |
 | Antigravity | `.agents/rules/athena.md` (12,000-character limit) | Athena-owned file |
 | Windsurf | `.windsurf/rules/athena.md` (`trigger: always_on`, 12,000-character limit); no MCP or hooks (per-user MCP config; Cascade hooks are legacy-only) | Athena-owned file |
 | Cline | `.clinerules/athena.md`, or `.cline/rules/athena.md` when `.clinerules` is a single file; no MCP or hooks (per-user MCP config; hooks are SDK plugins) | Athena-owned file |

@@ -14,6 +14,9 @@ export const ANTIGRAVITY_RULE_LIMIT = 12_000;
  * Source: https://antigravity.google/docs/rules-workflows/ (checked 2026-09).
  * Activation mode (Always On / Model Decision / Glob / Manual) is configured in
  * Antigravity; its frontmatter format is not documented, so Athena does not write one.
+ * Antigravity also reads AGENTS.md and GEMINI.md (https://antigravity.google/docs/rules, checked 2026-09),
+ * but those are shared instruction files — GEMINI.md is Gemini CLI's default context file — so they are
+ * not evidence that Antigravity specifically is used. Only .agents/ and .agent/ count.
  */
 export const antigravityAdapter: AgentAdapter = {
   id: 'antigravity',
@@ -21,7 +24,7 @@ export const antigravityAdapter: AgentAdapter = {
   capabilities: { instructionsFile: true, scopedRules: true, hooks: false, mcp: true },
   supportNote: 'Uses an Athena-owned workspace rule at .agents/rules/athena.md. Set its activation to "Always On" in Antigravity if it is not applied automatically.',
   async detectPresence(root) {
-    const evidence = await userEvidence(root, { files: ['GEMINI.md'], dirs: ['.agents', '.agent'], athenaOwned: [RULE_FILE] });
+    const evidence = await userEvidence(root, { dirs: ['.agents', '.agent'], athenaOwned: [RULE_FILE] });
     return { detectedInProject: evidence.length > 0, evidence };
   },
   async plan(ctx) {

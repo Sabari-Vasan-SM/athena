@@ -7,15 +7,18 @@ import { claudeCodeAdapter } from './claude-code/adapter.js';
 import { cursorAdapter } from './cursor/adapter.js';
 import { antigravityAdapter } from './antigravity/adapter.js';
 import { codexAdapter } from './codex/adapter.js';
+import { copilotAdapter } from './copilot/adapter.js';
+import { geminiCliAdapter } from './gemini-cli/adapter.js';
 import { windsurfAdapter } from './windsurf/adapter.js';
 import { clineAdapter } from './cline/adapter.js';
 import { agentsMdAdapter } from './agents-md/adapter.js';
 
-export const ADAPTERS: AgentAdapter[] = [claudeCodeAdapter, cursorAdapter, codexAdapter, antigravityAdapter, windsurfAdapter, clineAdapter, agentsMdAdapter];
+export const ADAPTERS: AgentAdapter[] = [claudeCodeAdapter, cursorAdapter, codexAdapter, copilotAdapter, geminiCliAdapter, antigravityAdapter, windsurfAdapter, clineAdapter, agentsMdAdapter];
 
 /** Accepts ids and friendly aliases. */
 export function resolveAdapters(names: string[]): AgentAdapter[] {
-  const alias: Record<string, string> = { claude: 'claude-code', claudecode: 'claude-code', agents: 'agents-md', 'agents.md': 'agents-md', gemini: 'antigravity', 'openai-codex': 'codex', 'codex-cli': 'codex', codeium: 'windsurf' };
+  const alias: Record<string, string> = { claude: 'claude-code', claudecode: 'claude-code', agents: 'agents-md', 'agents.md': 'agents-md', gemini: 'gemini-cli', geminicli: 'gemini-cli', 'openai-codex': 'codex', 'codex-cli': 'codex',
+    'github-copilot': 'copilot', 'gh-copilot': 'copilot', 'copilot-cli': 'copilot', 'google-antigravity': 'antigravity', codeium: 'windsurf' };
   const out: AgentAdapter[] = [];
   for (const raw of names) {
     const n = raw.trim().toLowerCase();
