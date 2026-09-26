@@ -24,7 +24,12 @@ describe.skipIf(process.platform === 'win32')('interruption and scale', () => {
     const child = spawn(process.execPath, [CLI, 'init', '--no-agents'], { cwd: dir, env: { ...process.env, NO_COLOR: '1', CI: '1' } });
     let stderr = '';
     child.stderr.on('data', (d) => (stderr += d));
-    await new Promise((r) => setTimeout(r, 250));
+    // Wait until the CLI has loaded (its first output) so the SIGINT handler is
+    // installed; a fixed delay raced process startup on slower CI runners.
+    await new Promise<void>((resolve) => {
+      child.stdout.once('data', () => resolve());
+      child.once('exit', () => resolve());
+    });
     child.kill('SIGINT');
     const code = await new Promise<number | null>((resolve) => child.on('exit', (c) => resolve(c)));
     const entries = await fs.readdir(dir);
