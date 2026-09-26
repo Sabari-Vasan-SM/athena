@@ -58,6 +58,21 @@ function wrapCode(text: string, w: number): string[] {
   );
 }
 
+/** Word-wrap plain text to the terminal width, indenting continuation lines. */
+export function wrapLines(text: string, indent = 2): string[] {
+  const w = Math.max(20, termWidth() - 1);
+  const out: string[] = [];
+  let cur = '';
+  for (const word of text.split(' ')) {
+    if (cur && cur.length + 1 + word.length > w) {
+      out.push(cur);
+      cur = ' '.repeat(indent) + word;
+    } else cur = cur ? `${cur} ${word}` : word;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 export function numbered(steps: string[]): (w: number) => string[] {
   return (w) =>
     steps.flatMap((s, i) => {

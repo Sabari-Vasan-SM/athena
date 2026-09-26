@@ -1,5 +1,5 @@
 import pc from 'picocolors';
-import { AUTHOR, ATHENA_VERSION, NPM_URL, REPO_URL } from '../../services/version.js';
+import { AUTHOR, ATHENA_VERSION, NPM_URL, REPO_URL, WEBSITE_URL } from '../../services/version.js';
 import { BRAND, box, cell, center, columns, gradient, gradientBlock, HR, paint, PALETTE, termWidth, vcenter, VR, width } from './layout.js';
 import { isJson, isQuiet, line, unicode } from './term.js';
 
@@ -107,9 +107,9 @@ function logoBlock(w: number): string[] {
 
 function linksBlock(): string[] {
   return [
-    pc.italic('"Turn any codebase'),
-    pc.italic(' into clear knowledge."'),
+    pc.italic('"Turn any codebase into clear knowledge."'),
     '',
+    `${paint(PALETTE.green, 'web', true)}     ${paint(PALETTE.cyan, WEBSITE_URL, true)}`,
     `${paint(PALETTE.pink, 'npm', true)}     ${pc.dim(`v${ATHENA_VERSION}`)}`,
     paint(PALETTE.blue, NPM_URL),
     paint(PALETTE.violet, 'github', true),
@@ -148,7 +148,11 @@ export function header(): string[] {
 }
 
 function compactLinks(): string[] {
-  return [`${paint(PALETTE.pink, 'npm', true)}     ${paint(PALETTE.blue, NPM_URL)}`, `${paint(PALETTE.violet, 'github', true)}  ${paint(PALETTE.blue, REPO_URL)}`];
+  return [
+    `${paint(PALETTE.green, 'web', true)}     ${paint(PALETTE.cyan, WEBSITE_URL, true)}`,
+    `${paint(PALETTE.pink, 'npm', true)}     ${paint(PALETTE.blue, NPM_URL)}`,
+    `${paint(PALETTE.violet, 'github', true)}  ${paint(PALETTE.blue, REPO_URL)}`,
+  ];
 }
 
 /** Closing banner: status on the left, links and author on the right. */
@@ -156,9 +160,9 @@ export function footer(title: string, subtitle: string, tone: 'success' | 'warn'
   const total = termWidth();
   const color = tone === 'success' ? PALETTE.green : PALETTE.amber;
   const mark = tone === 'success' ? '✓' : '!';
-  const status = [`${paint(color, ` ${mark} `, true)}  ${paint(color, title, true)}`, `     ${subtitle}`];
+  const status = [`${paint(color, ` ${mark} `, true)}  ${paint(color, title, true)}`, `     ${subtitle}`, ''];
   const links = compactLinks();
-  const credit = [pc.dim('Developed by'), `${paint(PALETTE.cyan, AUTHOR, true)} ${paint(PALETTE.pink, '♥')}`];
+  const credit = [pc.dim('Developed by'), `${paint(PALETTE.cyan, AUTHOR, true)} ${paint(PALETTE.pink, '♥')}`, ''];
   const statusW = Math.max(...status.map(width));
   const linksW = 8 + LINKS_WIDTH;
   const wide = statusW + 4 + linksW + 3 + 1 + 3 + 14 + 4;
@@ -166,10 +170,10 @@ export function footer(title: string, subtitle: string, tone: 'success' | 'warn'
     wide <= total
       ? columns([status, links, divider2(), credit], [statusW, linksW, 1, 14], 3)
       : total >= linksW + 4
-        ? [...status, '', ...links, credit.join(' ')]
+        ? [...status.filter(Boolean), '', ...links, credit.filter(Boolean).join(' ')]
         : [...status, pc.dim(REPO_URL)];
   const w = wide <= total ? wide : Math.min(total, Math.max(statusW, linksW) + 4);
   return box(content, w, { color });
 }
 
-const divider2 = () => [pc.dim(VR), pc.dim(VR)];
+const divider2 = () => [pc.dim(VR), pc.dim(VR), pc.dim(VR)];

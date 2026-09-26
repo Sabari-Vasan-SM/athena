@@ -5,6 +5,7 @@ export const PACKAGE_NAME = 'project-athena';
 export const AUTHOR = 'Sabarivasan';
 export const NPM_URL = `https://www.npmjs.com/package/${PACKAGE_NAME}`;
 export const REPO_URL = 'https://github.com/Sabari-Vasan-SM/athena';
+export const WEBSITE_URL = 'https://athena.sabari.me';
 
 function readVersion(): string {
   try {

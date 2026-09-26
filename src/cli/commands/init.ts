@@ -153,7 +153,7 @@ export function printSummary(result: PipelineResult, dryRun: boolean, mode: 'ini
           'Run `athena open` to browse and edit in the web UI',
           configured ? 'Your agents now read `.athena/` — watch with `athena activity`' : 'Connect an agent: `athena agents add claude-code`',
           'After code changes run `athena sync` to keep docs current',
-          'Share feedback and star on GitHub ★',
+          'Guides and docs: https://athena.sabari.me · star us on GitHub ★',
         ]
       : ['Review changes with `git diff .athena/`', 'Run `athena open` to browse in the web UI', 'Use `athena sync --watch` to stay current'];
 
@@ -176,7 +176,8 @@ export function printSummary(result: PipelineResult, dryRun: boolean, mode: 'ini
     ...(mode === 'init' && !dryRun
       ? (() => {
           const unconfigured = ADAPTERS.filter((a) => !result.agentChanges.some((c) => c.adapter.id === a.id));
-          return unconfigured.length ? [() => ui.line(ui.dim(`Not configured: ${unconfigured.map((a) => a.displayName).join(', ')} — not detected; add with \`athena agents add <id>\``))] : [];
+          const text = `Not configured (not detected in this project): ${unconfigured.map((a) => a.id).join(', ')}. Add one with \`athena agents add <id>\`.`;
+          return unconfigured.length ? [() => dash.wrapLines(text).forEach((l) => ui.line(ui.dim(l)))] : [];
         })()
       : []),
     ...(dryRun ? result.agentChanges.flatMap(({ adapter, changes }) => changes.map((ch) => () => ui.bullet(`${adapter.displayName}: would ${ch.action} ${ch.path}`))) : []),

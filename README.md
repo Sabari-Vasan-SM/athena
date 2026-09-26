@@ -2,6 +2,8 @@
 
 **Project intelligence for AI coding agents.**
 
+🌐 **Website & docs:** [athena.sabari.me](https://athena.sabari.me) · 📦 [npm](https://www.npmjs.com/package/project-athena) · [Changelog](CHANGELOG.md)
+
 Athena analyzes your repository and maintains a structured, human-readable understanding of it in `.athena/`: architecture, database, API, auth, security, testing, deployment, and your own project rules. It then points Claude Code, Cursor, Codex, Antigravity and other agents at that knowledge, so they plan and change code with real project context.
 
 Athena doesn't replace your coding agent, and it doesn't claim to make code bug-free or secure. It makes agents more **project-aware**, and it is honest about what it knows.

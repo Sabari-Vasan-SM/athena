@@ -33,3 +33,15 @@ Add an entry to `src/core/analyzer/catalog.ts`, with `markers` for config files 
 ## Adding an agent adapter
 
 Implement `AgentAdapter` in `src/agents/<agent>/` using the agent's **documented** instruction and hook mechanisms. Cite the documentation (with the date you checked it) in a comment. Hook entries must be marked with `--athena-hook`, merged into the agent's config without disturbing user entries, and removable. Register it in `src/agents/registry.ts`, and add doctor checks and an end-to-end test.
+
+## Releasing
+
+Releases are published by GitHub Actions (`.github/workflows/release.yml`) using npm trusted publishing, so no npm token is stored anywhere.
+
+1. Move the `## Unreleased` notes in `CHANGELOG.md` under a new `## <version> — <date>` heading.
+2. Run `npm version <patch|minor|major>` (this commits and tags `v<version>`).
+3. Run `git push --follow-tags`.
+
+The workflow runs typecheck, build and tests, checks that the tag matches `package.json`, publishes to npm with provenance, and creates a GitHub release from that version's changelog section.
+
+One-time setup: on npmjs.com, open `project-athena` → Settings → Trusted publishing, and add GitHub Actions with user `Sabari-Vasan-SM`, repository `athena` and workflow `release.yml`.

@@ -1,13 +1,19 @@
 name: Release
 
-# Publishes to npm when a version tag is pushed (e.g. `npm version minor && git push --follow-tags`).
+# Publishes to npm when a version tag is pushed:
+#   npm version minor && git push --follow-tags
+#
+# Uses npm trusted publishing (OIDC): no npm token is stored in GitHub.
+# One-time setup on npmjs.com → project-athena → Settings → Trusted publishing:
+#   GitHub Actions · user: Sabari-Vasan-SM · repository: athena · workflow: release.yml
+# npm adds provenance automatically for trusted publishes.
 on:
   push:
     tags: ['v*']
 
 permissions:
-  contents: read
-  id-token: write # npm provenance
+  contents: write # create the GitHub release
+  id-token: write # OIDC for npm trusted publishing
 
 jobs:
   publish:
@@ -16,9 +22,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
-          cache: npm
+          package-manager-cache: false # never cache in release builds
+      - name: Use npm ≥ 11.5.1 (required for trusted publishing)
+        run: npm install -g npm@^11.5.1
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
@@ -28,6 +36,17 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           PKG="$(node -p "require('./package.json').version")"
           test "$TAG" = "$PKG" || { echo "Tag $TAG does not match package.json $PKG"; exit 1; }
-      - run: npm publish --provenance --access public
+      - name: Publish to npm
+        # Checks already ran above, so skip prepublishOnly.
+        run: npm publish --access public --ignore-scripts
+      - name: Create the GitHub release from CHANGELOG.md
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '
+            /^## / { if (found) exit; if ($2 == v) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md || echo "See CHANGELOG.md." > release-notes.md
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag
