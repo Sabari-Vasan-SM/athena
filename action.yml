@@ -1,0 +1,151 @@
+name: Athena
+description: Fail CI when Athena knowledge (.athena/) is out of date, and review pull request diffs for secrets and committed env files.
+author: Sabarivasan
+branding:
+  icon: book-open
+  color: purple
+
+# Composite action using bash: runs on Linux and macOS runners. Windows runners are not supported.
+# The review needs the pull request's base commit: check out with `fetch-depth: 0`.
+
+inputs:
+  check-sync:
+    description: Run `athena sync --check` and fail when .athena/ knowledge is out of date.
+    required: false
+    default: 'true'
+  review:
+    description: Run `athena review --base <base>` on pull_request events and fail on blockers (possible secrets, committed env files). Skipped on other events unless `review-base` is set.
+    required: false
+    default: 'true'
+  review-base:
+    description: Git ref or SHA to review against. Default on pull_request events is the pull request's base commit.
+    required: false
+    default: ''
+  comment:
+    description: "Post the review as a pull request comment, updating Athena's previous comment instead of adding a new one. Needs `pull-requests: write` permission."
+    required: false
+    default: 'false'
+  version:
+    description: Version of the project-athena npm package to install (for example `latest` or `0.2.0`).
+    required: false
+    default: latest
+  working-directory:
+    description: Directory containing the Athena project (the folder with .athena/).
+    required: false
+    default: .
+  github-token:
+    description: Token used to post the pull request comment.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  in-sync:
+    description: "`true` when knowledge is in sync, `false` when it is out of date, empty when the check was skipped."
+    value: ${{ steps.sync.outputs.in-sync }}
+  blockers:
+    description: Number of review blockers, empty when the review was skipped.
+    value: ${{ steps.review.outputs.blockers }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check Node.js version
+      id: node
+      shell: bash
+      run: |
+        ok=false
+        if command -v node >/dev/null 2>&1; then
+          if node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>22||(a===22&&b>=12)?0:1)'; then ok=true; fi
+        fi
+        echo "ok=$ok" >> "$GITHUB_OUTPUT"
+        if [ "$ok" = true ]; then echo "Using Node.js $(node --version)"; else echo "Node.js >= 22.12 not found; installing Node.js 22."; fi
+
+    - name: Set up Node.js 22
+      if: steps.node.outputs.ok != 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Install Athena
+      shell: bash
+      env:
+        ATHENA_VERSION: ${{ inputs.version }}
+      run: |
+        case "$ATHENA_VERSION" in
+          ''|*[!A-Za-z0-9._~^*-]*) echo "::error::Invalid version input"; exit 1 ;;
+        esac
+        npm install -g --no-fund --no-audit "project-athena@$ATHENA_VERSION"
+        athena --version
+
+    - name: Check knowledge is in sync
+      id: sync
+      if: inputs.check-sync == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        out="$RUNNER_TEMP/athena-sync.json"
+        athena --no-color sync --check --json > "$out" || true
+        node "$GITHUB_ACTION_PATH/action/report.mjs" sync "$out"
+
+    - name: Review the pull request diff
+      id: review
+      if: inputs.review == 'true' && (inputs.review-base != '' || github.event.pull_request.base.sha)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BASE: ${{ inputs.review-base || github.event.pull_request.base.sha }}
+      run: |
+        if ! git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null; then
+          echo "::error::The review base commit is not in this checkout. Use actions/checkout with fetch-depth: 0."
+          echo "blockers=" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+        out="$RUNNER_TEMP/athena-review.json"
+        athena --no-color review --base "$BASE" --no-sync --json > "$out" || true
+        node "$GITHUB_ACTION_PATH/action/report.mjs" review "$out"
+
+    - name: Comment on the pull request
+      if: always() && inputs.comment == 'true' && steps.review.outcome == 'success' && github.event.pull_request.number
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        body="$RUNNER_TEMP/athena-comment.md"
+        if [ -f "$RUNNER_TEMP/athena-sync.json" ]; then
+          node "$GITHUB_ACTION_PATH/action/report.mjs" markdown "$RUNNER_TEMP/athena-review.json" "$RUNNER_TEMP/athena-sync.json" > "$body"
+        else
+          node "$GITHUB_ACTION_PATH/action/report.mjs" markdown "$RUNNER_TEMP/athena-review.json" > "$body"
+        fi
+        cat "$body" >> "$GITHUB_STEP_SUMMARY"
+        id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+          --jq '[.[] | select(.user.type == "Bot" and (.body | contains("<!-- athena-review -->")))][0].id // empty' 2>/dev/null | head -n 1) || id=""
+        if [ -n "$id" ] && gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F "body=@$body" >/dev/null; then
+          echo "Updated the Athena review comment."
+        elif gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F "body=@$body" >/dev/null; then
+          echo "Posted the Athena review comment."
+        else
+          echo "::warning::Could not post the Athena review comment. The workflow needs 'permissions: pull-requests: write' (comments are not possible from forks with the default token)."
+        fi
+
+    - name: Result
+      if: always()
+      shell: bash
+      env:
+        CHECK_SYNC: ${{ inputs.check-sync }}
+        IN_SYNC: ${{ steps.sync.outputs.in-sync }}
+        REVIEW_OUTCOME: ${{ steps.review.outcome }}
+        BLOCKERS: ${{ steps.review.outputs.blockers }}
+      run: |
+        failed=0
+        if [ "$CHECK_SYNC" = true ] && [ "$IN_SYNC" != true ]; then
+          echo "Athena: knowledge is out of date (or the check failed)."; failed=1
+        fi
+        if [ "$REVIEW_OUTCOME" = failure ]; then
+          echo "Athena: the review could not run."; failed=1
+        elif [ -n "$BLOCKERS" ] && [ "$BLOCKERS" != 0 ]; then
+          echo "Athena: the review found $BLOCKERS blocker(s)."; failed=1
+        elif [ "$REVIEW_OUTCOME" = skipped ]; then
+          echo "Athena: review skipped (disabled, not a pull_request event without review-base, or an earlier step failed)."
+        fi
+        exit $failed

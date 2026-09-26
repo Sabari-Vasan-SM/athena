@@ -1,5 +1,5 @@
 import { hasBlockers, reviewChanges, type ReviewFinding } from '../../services/review.js';
-import { planSync } from '../../services/sync.js';
+import { planSync, staleForCheck } from '../../services/sync.js';
 import { EXIT } from '../../services/errors.js';
 import { requireProjectRoot, type GlobalOptions } from '../context.js';
 import * as ui from '../ui/term.js';
@@ -25,7 +25,7 @@ export async function reviewCommand(opts: ReviewOptions): Promise<number> {
     result = await reviewChanges(root, {
       base: opts.base,
       signal: opts.signal,
-      checkSync: opts.noSync ? undefined : async (r) => (await planSync(r, { signal: opts.signal })).upToDate,
+      checkSync: opts.noSync ? undefined : async (r) => staleForCheck(await planSync(r, { signal: opts.signal })).length === 0,
     });
     sp.stop();
   } catch (err) {

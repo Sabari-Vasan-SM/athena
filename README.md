@@ -63,6 +63,7 @@ Generated content sits between `athena:generated` markers. Anything outside the 
 | `athena activity` | Show AI agent activity observed through hooks (`-n`, `--agent`) |
 | `athena security` | Audit dependencies with the tools installed for this project, and report secret findings (`--fail-on`, `--last`, `--no-audit`) |
 | `athena review` | Check the current diff for facts worth reviewing, and list your rules and checklist (`--base`, `--no-fail`) |
+| `athena git-hook` | `install` (`--review`), `uninstall`, `status` — a Git pre-commit hook that blocks commits when knowledge is out of date |
 | `athena context <task>` | Show which knowledge an agent should read for a task (`--full`, `--json`) |
 | `athena graph` | Inspect the project graph (`--build`, `--search`, `--node`, `--kind`) |
 | `athena mcp` | Serve project intelligence to agents over MCP (stdio; `--allow-write`) |
@@ -102,7 +103,7 @@ Apply updates to 2 documents? [y/N]
 - **Nothing is written without review.** `athena watch` and the web UI only propose updates. You can apply or ignore a proposal (an ignored proposal stays quiet until the files change again), or opt in to `--auto-apply`.
 - **Your edits are still safe.** Developer-edited sections are preserved and listed. Applying is refused if a document changed after the proposal was made.
 - When files change but no knowledge is affected, only the local index is refreshed.
-- `athena sync --check` exits with 1 when knowledge is out of date, which is useful in CI or a pre-commit hook.
+- `athena sync --check` exits with 1 when knowledge is out of date, which is useful in CI or a pre-commit hook (see [Use in CI and git hooks](#use-in-ci-and-git-hooks)). Change hotspots come from Git history and move with every commit, so the check ignores them; `athena sync` still refreshes them.
 - Ignore rules: defaults, root and nested `.gitignore` files, `.git/info/exclude`, and `.athena/config.json`.
 
 ## Watching what agents do
@@ -142,6 +143,88 @@ athena review                     # check the current diff before you commit
 **`athena security`** runs the audit tools your project's ecosystems provide (`npm audit`, `pnpm audit`, `pip-audit`, `govulncheck`, `cargo audit`, `composer audit`) and reports what they find, attributed to the tool. Athena has no vulnerability database of its own: a tool that isn't installed is reported as **unknown**, never as "no problems". Results are stored in `.athena/security-scan.json` and recorded in `security.md` on the next `athena sync`.
 
 **`athena review`** checks facts about your current diff: secrets in added lines (a blocker, exit 1), committed env files, new dependencies, source changed without tests, API/schema/auth touchpoints, large files, debug leftovers, and whether Athena knowledge is stale. It then lists your enabled rules and the project's review checklist for you or your agent to apply — Athena does not claim to judge whether they are met, and it runs no AI.
+
+## Use in CI and git hooks
+
+Commit `.athena/` so your team and CI share it. Athena can then keep it honest in two places.
+
+### GitHub Action
+
+```yaml
+# .github/workflows/athena.yml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write # only for `comment: true`
+jobs:
+  athena:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the review diffs the pull request against its base commit
+      - uses: Sabari-Vasan-SM/athena@v0
+        with:
+          comment: true
+```
+
+| Input | Default | |
+|---|---|---|
+| `check-sync` | `true` | Run `athena sync --check`; fail when `.athena/` is out of date |
+| `review` | `true` | On `pull_request` events, run `athena review --base <PR base>`; fail on blockers (possible secrets, committed env files). Skipped on other events |
+| `review-base` | PR base SHA | Ref to review against, for example on `push` events |
+| `comment` | `false` | Post the findings as one pull request comment and update it on later pushes (marked with `<!-- athena-review -->`) |
+| `version` | `latest` | `project-athena` version to install with `npm install -g` |
+| `working-directory` | `.` | Folder that contains `.athena/` |
+| `github-token` | `github.token` | Token for the comment |
+
+Outputs: `in-sync` (`true`/`false`) and `blockers` (a count). The comment and logs show each finding's type and file location, never the matched value.
+
+- The action uses Node.js if it is already 22.12 or newer, and otherwise installs Node.js 22 with `actions/setup-node`.
+- It is a composite action written in bash, so it runs on Linux and macOS runners. Windows runners are not supported.
+- Without `fetch-depth: 0` the base commit is missing and the review step fails with a message saying so.
+- Pull requests from forks get a read-only token, so the comment is skipped with a warning; the checks still run.
+
+A complete workflow is in [examples/github-workflow.yml](examples/github-workflow.yml).
+
+### Git pre-commit hook
+
+```text
+$ athena git-hook install
+✓ Installed the pre-commit hook (knowledge check) at .git/hooks/pre-commit
+Commits are blocked when .athena/ knowledge is out of date. Teammates without Athena installed are not blocked.
+Using husky, lefthook or pre-commit? Add `npx --no-install athena sync --check` to its pre-commit config instead.
+
+$ git commit -m "Add refunds"
+Proposed: api.md, security.md
+Knowledge is out of date. Run `athena sync` to review and apply.
+athena: commit blocked: .athena/ knowledge is out of date. Run `athena sync`, stage .athena/ and commit again (or skip once with `git commit --no-verify`).
+```
+
+- `athena git-hook install --review` also runs `athena review` and blocks commits that add possible secrets or env files. It checks the whole working tree (staged, unstaged and untracked files that aren't ignored), not only what is staged.
+- The hook is a `#!/bin/sh` script in the directory Git actually uses (`git rev-parse --git-path hooks`), so `core.hooksPath` and linked worktrees work. For a project in a subfolder of the repository, the hook runs Athena there.
+- If `athena` is not on `PATH`, the hook prints a note and lets the commit through, so it never blocks teammates who don't use Athena.
+- **An existing pre-commit hook is kept.** If it is a shell script, Athena adds its block between `# athena:start` and `# athena:end` right after the shebang, so it runs before your own commands. Athena refuses to touch hooks written in other languages and hooks it recognizes as managed by husky, lefthook or pre-commit (from `core.hooksPath` or the hook's contents), and prints the line to add instead.
+- `athena git-hook uninstall` removes only Athena's block (or the file, if Athena created it). `athena git-hook status` shows what is installed.
+
+**husky, lefthook and other hook managers:** add one line to your pre-commit config instead of installing the hook. It needs `project-athena` as a devDependency or installed globally.
+
+```bash
+# .husky/pre-commit
+npx --no-install athena sync --check
+```
+
+```yaml
+# lefthook.yml
+pre-commit:
+  commands:
+    athena:
+      run: npx --no-install athena sync --check
+```
+
+### Example project
+
+[examples/demo-shop](examples/demo-shop) is a small Express + Prisma API with its generated `.athena/` knowledge committed, so you can see what Athena writes before running it on your own code. See [examples/README.md](examples/README.md).
 
 ## Context engine, graph and MCP
 

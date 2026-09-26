@@ -19,6 +19,7 @@ import { architectureCommand, contextCommand, graphCommand } from './commands/co
 import { aiEnrichCommand, aiStatusCommand } from './commands/ai.js';
 import { mcpCommand } from './commands/mcp.js';
 import { watchCommand } from './commands/watch.js';
+import { gitHookInstallCommand, gitHookStatusCommand, gitHookUninstallCommand } from './commands/git-hook.js';
 import { agentsAddCommand, agentsListCommand, agentsRemoveCommand } from './commands/agents.js';
 
 const controller = new AbortController();
@@ -180,6 +181,15 @@ export function buildProgram(): Command {
   agents.command('list', { isDefault: true }).description('Show supported agents and integration status').action(run(async (_o: unknown, cmd: Command) => agentsListCommand(globals(cmd))));
   agents.command('add <agents...>').description('Configure integrations (claude-code, cursor, codex, copilot, gemini-cli, antigravity, windsurf, cline, agents-md, or "all")').action(run(async (names: string[], _o: unknown, cmd: Command) => agentsAddCommand(names, globals(cmd))));
   agents.command('remove <agents...>').description('Remove Athena-managed integration files/blocks').action(run(async (names: string[], _o: unknown, cmd: Command) => agentsRemoveCommand(names, globals(cmd))));
+
+  const gitHook = program.command('git-hook').description('Install a Git pre-commit hook that blocks commits when knowledge is out of date');
+  gitHook.command('status', { isDefault: true }).description('Show whether the Athena pre-commit hook is installed').action(run(async (_o: unknown, cmd: Command) => gitHookStatusCommand(globals(cmd))));
+  gitHook
+    .command('install')
+    .description('Add the Athena pre-commit hook (existing hooks are kept; Athena adds a marked block)')
+    .option('--review', 'Also run `athena review` and block commits with possible secrets or env files')
+    .action(run(async (o: { review?: boolean }, cmd: Command) => gitHookInstallCommand({ ...globals(cmd), review: o.review })));
+  gitHook.command('uninstall').description("Remove Athena's pre-commit hook or block").action(run(async (_o: unknown, cmd: Command) => gitHookUninstallCommand(globals(cmd))));
 
   program
     .command('open')

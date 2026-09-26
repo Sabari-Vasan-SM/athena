@@ -45,11 +45,12 @@ export async function gitInfo(cwd: string): Promise<GitInfo> {
     const counts = new Map<string, number>();
     for (const line of log.stdout.split('\n')) {
       const p = line.trim();
-      if (!p) continue;
+      // Athena's own output is not a code hotspot; counting it would make every knowledge commit change the hotspots.
+      if (!p || p === '.athena' || p.startsWith('.athena/')) continue;
       const dir = p.includes('/') ? p.split('/').slice(0, 2).join('/') : '.';
       counts.set(dir, (counts.get(dir) ?? 0) + 1);
     }
-    info.hotspots = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([path, commits]) => ({ path, commits }));
+    info.hotspots = [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).slice(0, 10).map(([path, commits]) => ({ path, commits }));
   }
   return info;
 }

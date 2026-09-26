@@ -1,0 +1,30 @@
+# Copy to .github/workflows/athena.yml in a project that has committed its .athena/ knowledge.
+name: Athena
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write # only needed for `comment: true`
+
+jobs:
+  athena:
+    runs-on: ubuntu-latest # Linux or macOS; the action uses bash and does not support Windows runners
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the review compares the pull request with its base commit
+      # Optional: the action installs Node.js 22 itself when Node.js >= 22.12 is not already set up.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Sabari-Vasan-SM/athena@v0
+        with:
+          check-sync: true # fail when .athena/ is out of date
+          review: true # on pull requests: fail on possible secrets or committed env files
+          comment: true # post (and later update) one review comment on the pull request
+          # version: latest
+          # working-directory: .

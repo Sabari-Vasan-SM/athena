@@ -306,3 +306,15 @@ export function summarizePlan(plan: SyncPlan) {
   const { documents, ...rest } = plan;
   return { ...rest, documents: documents.map(({ diff: _diff, ...d }) => d) };
 }
+
+/**
+ * Sections rendered from Git history rather than from the code. They change with
+ * every commit (and as the history window moves), so `sync --check` does not
+ * treat them as stale knowledge; `athena sync` still refreshes them.
+ */
+export const HISTORY_SECTIONS: ReadonlySet<string> = new Set(['hotspots']);
+
+/** Documents that make `athena sync --check` fail: any change beyond history-derived sections. */
+export function staleForCheck(plan: SyncPlan): ProposedDocument[] {
+  return plan.documents.filter((d) => d.status === 'created' || !d.changedSections.length || d.changedSections.some((s) => !HISTORY_SECTIONS.has(s)));
+}
