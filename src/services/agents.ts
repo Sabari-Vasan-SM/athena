@@ -77,10 +77,21 @@ export async function configureAgents(root: string, names: string[]): Promise<Ar
 export async function removeAgents(root: string, names: string[]): Promise<string[]> {
   const st = await readState(athenaDir(root));
   const removed: string[] = [];
-  for (const a of resolve(names)) {
+  const targets = resolve(names);
+  for (const a of targets) {
     removed.push(...(await a.remove(root)));
     if (st.kind === 'ok') delete st.state.agents[a.id];
   }
-  if (st.kind === 'ok') await writeState(athenaDir(root), st.state);
+  if (st.kind === 'ok') {
+    // Some files are shared (Codex and the AGENTS.md integration both use the
+    // AGENTS.md block). Restore them for integrations that are still configured.
+    for (const a of ADAPTERS) {
+      const s = st.state.agents[a.id];
+      if (!s?.configured || targets.includes(a) || !s.files.some((f) => removed.includes(f))) continue;
+      const planned = await a.plan({ root, projectName: st.state.projectName });
+      await applyChanges(root, planned.filter((p) => removed.includes(p.path)));
+    }
+    await writeState(athenaDir(root), st.state);
+  }
   return removed;
 }

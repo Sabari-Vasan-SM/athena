@@ -34,7 +34,7 @@ const TEST_COMMAND = /\b(test|vitest|jest|pytest|go test|cargo test|mocha|rspec|
 const REVIEW_COMMAND = /\b(lint|eslint|ruff|clippy|tsc|typecheck|type-check|mypy|flake8|rubocop|golangci-lint|audit)\b/i;
 
 const READ_TOOLS = new Set(['read', 'glob', 'grep', 'notebookread', 'webfetch', 'websearch', 'ls', 'searchreplace']);
-const EDIT_TOOLS = new Set(['edit', 'write', 'multiedit', 'notebookedit', 'applypatch', 'create_diff', 'str_replace']);
+const EDIT_TOOLS = new Set(['edit', 'write', 'multiedit', 'notebookedit', 'applypatch', 'apply_patch', 'create_diff', 'str_replace']);
 
 function truncate(s: string, n = 160): string {
   const one = s.replace(/\s+/g, ' ').trim();
@@ -64,6 +64,16 @@ function filesFrom(input: Record<string, unknown> | null, payload: Record<string
   return [...new Set(out)];
 }
 
+/** File paths named in an apply_patch body (`*** Update File: path` and friends). */
+export function patchFiles(patch: string): string[] {
+  const out: string[] = [];
+  for (const m of patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)) {
+    const f = (m[1] ?? m[2])!.trim();
+    if (f) out.push(f);
+  }
+  return [...new Set(out)];
+}
+
 interface Classified {
   kind: AgentEventKind;
   state: AgentActivityState;
@@ -81,7 +91,7 @@ function classifyTool(tool: string, command: string | null, files: string[]): Cl
     return { kind: 'command', state: 'CODING', message: command ? `Running: ${command}` : 'Running a shell command' };
   }
   if (t === 'task' || t === 'agent') return { kind: 'subagent', state: 'PLANNING', message: 'Delegating to a subagent' };
-  if (t === 'todowrite' || t === 'exitplanmode' || t === 'plan') return { kind: 'tool', state: 'PLANNING', message: 'Updating its plan' };
+  if (t === 'todowrite' || t === 'exitplanmode' || t === 'plan' || t === 'update_plan') return { kind: 'tool', state: 'PLANNING', message: 'Updating its plan' };
   return { kind: 'tool', state: 'CODING', message: `Using ${tool}` };
 }
 
@@ -95,9 +105,12 @@ export function normalizeHookEvent(agent: string, hookName: string, payload: Rec
   const session = asString(payload.session_id) ?? asString(payload.conversation_id) ?? null;
   const toolInput = payload.tool_input && typeof payload.tool_input === 'object' ? (payload.tool_input as Record<string, unknown>) : null;
   const tool = asString(payload.tool_name) ?? asString(payload.tool) ?? null;
+  // Codex's apply_patch carries the patch text in tool_input.command: report the
+  // files it touches, never the patch body as if it were a shell command.
+  const isPatch = tool?.toLowerCase() === 'apply_patch';
   const rawCommand = asString(toolInput?.command) ?? asString(payload.command);
-  const command = rawCommand ? truncate(rawCommand) : null;
-  const files = filesFrom(toolInput, payload);
+  const command = rawCommand && !isPatch ? truncate(rawCommand) : null;
+  const files = isPatch && rawCommand ? patchFiles(rawCommand) : filesFrom(toolInput, payload);
 
   let c: Classified | null = null;
   if (h === 'sessionstart' || h === 'workspaceopen') c = { kind: 'session-start', state: 'IDLE', message: 'Session started' };
@@ -133,4 +146,6 @@ export function normalizeHookEvent(agent: string, hookName: string, payload: Rec
 
 /** Hook events Athena installs, per agent. */
 export const CLAUDE_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop', 'SessionEnd'] as const;
+/** Codex hook events (https://learn.chatgpt.com/docs/hooks); names match Claude Code's. */
+export const CODEX_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop', 'SessionEnd'] as const;
 export const CURSOR_HOOK_EVENTS = ['sessionStart', 'beforeSubmitPrompt', 'beforeShellExecution', 'afterFileEdit', 'stop', 'sessionEnd'] as const;

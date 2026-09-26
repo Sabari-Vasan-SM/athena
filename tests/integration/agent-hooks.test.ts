@@ -9,6 +9,8 @@ import { readRecentEvents, summarizeSessions } from '../../src/services/agent-ac
 import { normalizeHookEvent } from '../../src/agents/common/hook-events.js';
 import { claudeCodeAdapter } from '../../src/agents/claude-code/adapter.js';
 import { cursorAdapter } from '../../src/agents/cursor/adapter.js';
+import { codexAdapter } from '../../src/agents/codex/adapter.js';
+import { removeAgents, configureAgents } from '../../src/services/agents.js';
 import { applyChanges } from '../../src/agents/registry.js';
 import { CLI, cleanupProjects, FAKE, makeProject } from '../helpers.js';
 
@@ -54,6 +56,17 @@ describe('hook payload normalization', () => {
     expect(ev('afterFileEdit', { file_path: 'src/x.ts', edits: [{ file_path: 'src/y.ts' }] })).toMatchObject({ kind: 'edit', files: ['src/x.ts', 'src/y.ts'] });
     expect(ev('beforeShellExecution', { command: 'pytest -q' })).toMatchObject({ state: 'TESTING' });
     expect(ev('afterShellExecution', { command: 'pytest -q' })).toBeNull();
+  });
+
+  it('maps Codex hooks, reporting apply_patch files instead of the patch body', () => {
+    const ev = (hook: string, payload: Record<string, unknown>) => normalizeHookEvent('codex', hook, payload);
+    const patch = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-x\n+y\n*** Add File: src/b.ts\n+z\n*** End Patch';
+    const edit = ev('PreToolUse', { tool_name: 'apply_patch', tool_input: { command: patch } })!;
+    expect(edit).toMatchObject({ kind: 'edit', state: 'CODING', files: ['src/a.ts', 'src/b.ts'], command: null });
+    expect(JSON.stringify(edit)).not.toContain('Begin Patch');
+    expect(ev('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'cargo test' } })).toMatchObject({ kind: 'command', state: 'TESTING' });
+    expect(ev('PreToolUse', { tool_name: 'update_plan', tool_input: {} })).toMatchObject({ state: 'PLANNING' });
+    expect(ev('SessionStart', { session_id: 'x1' })).toMatchObject({ kind: 'session-start', session: 'x1' });
   });
 
   it('never records agent reasoning, only tool facts', () => {
@@ -142,6 +155,67 @@ describe('hook installation', () => {
     await cursorAdapter.remove(dir);
     await expect(fs.access(path.join(dir, '.cursor/hooks.json'))).rejects.toThrow();
     await expect(fs.access(script)).rejects.toThrow();
+  });
+
+  it('installs Codex MCP and hooks without touching existing config', async () => {
+    const dir = await project();
+    const codexHome = path.join(dir, '.test-codex-home');
+    process.env.CODEX_HOME = codexHome;
+    try {
+      await fs.mkdir(path.join(dir, '.codex'), { recursive: true });
+      const userToml = '# my settings\nmodel = "gpt-5"\n\n[mcp_servers.docs]\ncommand = "docs-mcp"\n';
+      await fs.writeFile(path.join(dir, '.codex/config.toml'), userToml);
+
+      await applyChanges(dir, await codexAdapter.plan({ root: dir, projectName: 'shop' }));
+      const toml = await fs.readFile(path.join(dir, '.codex/config.toml'), 'utf8');
+      expect(toml.startsWith(userToml.trimEnd())).toBe(true);
+      expect(toml).toContain('[mcp_servers.athena]');
+      expect(toml).toContain('args = ["mcp"]');
+      const hooks = JSON.parse(await fs.readFile(path.join(dir, '.codex/hooks.json'), 'utf8'));
+      expect(hooks.hooks.PreToolUse[0].hooks[0]).toMatchObject({ type: 'command', timeout: 10 });
+      expect(hooks.hooks.PreToolUse[0].hooks[0].command).toBe('athena event --athena-hook --agent codex --hook PreToolUse');
+      expect(await fs.readFile(path.join(dir, 'AGENTS.md'), 'utf8')).toContain('<!-- athena:start -->');
+
+      // Idempotent
+      const again = await codexAdapter.plan({ root: dir, projectName: 'shop' });
+      expect(again.every((c) => c.action === 'unchanged')).toBe(true);
+
+      // Trust is read from the Codex home, never written
+      const trustMsg = async () => (await codexAdapter.check(dir)).find((c) => /trust/i.test(c.message))!;
+      expect((await trustMsg()).ok).toBe(false);
+      await fs.mkdir(codexHome, { recursive: true });
+      await fs.writeFile(path.join(codexHome, 'config.toml'), `[projects.${JSON.stringify(dir)}]\ntrust_level = "trusted"\n`);
+      expect(await trustMsg()).toMatchObject({ ok: true });
+      expect((await codexAdapter.check(dir)).filter((c) => !/trust/i.test(c.message)).every((c) => c.ok)).toBe(true);
+
+      await codexAdapter.remove(dir);
+      expect(await fs.readFile(path.join(dir, '.codex/config.toml'), 'utf8')).toBe(userToml);
+      await expect(fs.access(path.join(dir, '.codex/hooks.json'))).rejects.toThrow();
+    } finally {
+      delete process.env.CODEX_HOME;
+    }
+  });
+
+  it('leaves a developer-defined Codex "athena" MCP server alone, and rejects malformed TOML', async () => {
+    const dir = await project();
+    await fs.mkdir(path.join(dir, '.codex'), { recursive: true });
+    const own = '[mcp_servers.athena]\ncommand = "/opt/athena/bin/athena"\nargs = ["mcp", "--allow-write"]\n';
+    await fs.writeFile(path.join(dir, '.codex/config.toml'), own);
+    const config = (await codexAdapter.plan({ root: dir, projectName: 'shop' })).find((c) => c.path === '.codex/config.toml')!;
+    expect(config).toMatchObject({ action: 'unchanged', content: own });
+
+    await fs.writeFile(path.join(dir, '.codex/config.toml'), 'model = ');
+    await expect(codexAdapter.plan({ root: dir, projectName: 'shop' })).rejects.toThrow(/not valid TOML/);
+  });
+
+  it('keeps the shared AGENTS.md block when Codex is removed but AGENTS.md stays configured', async () => {
+    const dir = await project();
+    await configureAgents(dir, ['codex', 'agents-md']);
+    await removeAgents(dir, ['codex']);
+    expect(await fs.readFile(path.join(dir, 'AGENTS.md'), 'utf8')).toContain('<!-- athena:start -->');
+    await expect(fs.access(path.join(dir, '.codex/hooks.json'))).rejects.toThrow();
+    await removeAgents(dir, ['agents-md']);
+    await expect(fs.access(path.join(dir, 'AGENTS.md'))).rejects.toThrow();
   });
 
   it('refuses to touch malformed agent config', async () => {
