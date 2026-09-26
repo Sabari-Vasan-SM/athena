@@ -36,7 +36,7 @@ src/
 │   └── agents/adapter.ts      # AgentAdapter interface only
 ├── ai/                        # AIProvider interface + anthropic/openai/google/ollama
 ├── mcp/                       # MCP server (stdio) exposing context to agents
-├── agents/                    # adapters: claude-code, cursor, antigravity, agents-md
+├── agents/                    # adapters: claude-code, cursor, codex, antigravity, windsurf, cline, agents-md
 ├── services/                  # use cases shared by CLI and server: pipeline, status, doctor,
 │                              # knowledge (read/save/search/history), rules, agents, overview
 ├── server/                    # Fastify app, security guard, event bus, static allowlist, instance lifecycle
@@ -99,6 +99,8 @@ Each adapter uses the agent's own documented mechanism:
 | Cursor | `.cursor/rules/athena.mdc` (`alwaysApply: true`) | Athena-owned file |
 | Codex | `AGENTS.md` block; `[mcp_servers.athena]` between `# athena:start`/`# athena:end` in `.codex/config.toml`; entries in `.codex/hooks.json` | Marked blocks/entries in user files |
 | Antigravity | `.agents/rules/athena.md` (12,000-character limit) | Athena-owned file |
+| Windsurf | `.windsurf/rules/athena.md` (`trigger: always_on`, 12,000-character limit); no MCP or hooks (per-user MCP config; Cascade hooks are legacy-only) | Athena-owned file |
+| Cline | `.clinerules/athena.md`, or `.cline/rules/athena.md` when `.clinerules` is a single file; no MCP or hooks (per-user MCP config; hooks are SDK plugins) | Athena-owned file |
 | AGENTS.md | Marked block (cross-tool convention) | Marked block in a user file |
 
 Instruction text is shared (`src/agents/common/instructions.ts`) and contains a **relevance map** (`core/knowledge/documents.ts`). Agents load only the documents relevant to the task instead of all twelve. Adapters never overwrite a user file that sits at an Athena-owned path, and never write through symlinks.

@@ -59,7 +59,7 @@ Generated content sits between `athena:generated` markers. Anything outside the 
 | `athena watch` | Watch the project and propose updates as files change (`--auto-apply` to write automatically) |
 | `athena doctor` | Check the installation, project, knowledge files and agent integrations |
 | `athena rules` | `list`, `add "<rule>" --section <name>`, `edit`, `enable`, `disable`, `remove` |
-| `athena agents` | `list`, `add <claude-code\|cursor\|antigravity\|agents-md\|all>`, `remove` |
+| `athena agents` | `list`, `add <claude-code\|cursor\|codex\|antigravity\|windsurf\|cline\|agents-md\|all>`, `remove` |
 | `athena activity` | Show AI agent activity observed through hooks (`-n`, `--agent`) |
 | `athena security` | Audit dependencies with the tools installed for this project, and report secret findings (`--fail-on`, `--last`, `--no-audit`) |
 | `athena review` | Check the current diff for facts worth reviewing, and list your rules and checklist (`--base`, `--no-fail`) |
@@ -115,6 +115,8 @@ Athena configures hooks for agents that support them, so it can show what they a
 | Cursor | Hooks in `.cursor/hooks.json` plus a small forwarding script |
 | Codex | Hooks in `.codex/hooks.json` running `athena event` (Codex loads them only for trusted projects) |
 | Antigravity | No documented hook mechanism — activity is reported as unavailable |
+| Windsurf | Not installed: Cascade hooks applied only to the legacy Cascade agent, which Devin Desktop (Windsurf's new name) kept available only through July 2026 — activity is reported as unavailable |
+| Cline | Not installed: Cline's hooks are SDK plugins (TypeScript) that don't run in the IDE extensions — activity is reported as unavailable |
 
 Hooks append events to `.athena/.agent-events.jsonl` (gitignored, rotated, no network). The UI tails that file, so activity shows up live and history survives with the UI closed.
 
@@ -214,6 +216,8 @@ Security: the server binds to `127.0.0.1` only, on the first free port from 7432
 | Cursor | `.cursor/rules/athena.mdc` (always applied) |
 | Codex | The marked block in `AGENTS.md` (which Codex reads), plus `.codex/config.toml` and `.codex/hooks.json`. Codex ignores `.codex/` until you trust the project; `athena doctor` tells you if it isn't trusted yet |
 | Antigravity | `.agents/rules/athena.md` (set to *Always On* in Antigravity if needed) |
+| Windsurf | `.windsurf/rules/athena.md` (`trigger: always_on`, under the 12,000-character limit), read by Windsurf and Devin Desktop. MCP is per-user in Windsurf, so add `athena mcp` to your `mcp_config.json` yourself |
+| Cline | `.clinerules/athena.md`, or `.cline/rules/athena.md` if `.clinerules` is a single file (Athena never touches that file). MCP is per-user in Cline, so add `athena mcp` in Cline's MCP settings yourself |
 | Others | A marked block in `AGENTS.md` |
 
 The instructions include a **relevance map**. A database task reads `database.md`, `architecture.md`, `api.md`, `security.md`, `testing.md` and `rules.md`, while a styling tweak reads only `project.md`, `architecture.md` and `rules.md`. Agents don't load everything for every task.

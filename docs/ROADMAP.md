@@ -10,7 +10,7 @@ Status legend: ✅ done · 🔜 next · 📋 planned
 - ✅ Provenance model (`FACT`/`DETECTED`/`INFERRED`/`UNKNOWN`)
 - ✅ 12 knowledge documents with managed blocks and developer notes; `rules.md` round-trip
 - ✅ `state.json` with a file index and change detection; impact mapping for `status`
-- ✅ Agent adapters: Claude Code, Cursor, Codex, Antigravity, AGENTS.md
+- ✅ Agent adapters: Claude Code, Cursor, Codex, Antigravity, Windsurf, Cline, AGENTS.md
 - ✅ Tests: unit, analyzer integration, CLI end-to-end, interruption, a 20k-file scale test, module boundaries
 
 **Known Phase 1 limitations**
@@ -70,6 +70,7 @@ Status legend: ✅ done · 🔜 next · 📋 planned
 
 **Known Phase 4 limitations**
 - Antigravity publishes no hook mechanism, so its activity is reported as unsupported.
+- Windsurf and Cline integrations are rules-only: both keep MCP config per user (outside the project), Windsurf's Cascade hooks applied only to the legacy Cascade agent (available through July 2026), and Cline's hooks are SDK plugins that don't run in its IDE extensions. Their activity is reported as unsupported.
 - The Cursor forwarding script is generated for the current platform (`.sh` or `.cmd`); a repo shared across platforms needs a re-run of `athena agents add cursor`.
 - Athena cannot tell whether an agent is running when no hook has fired, and it never sees reasoning or plans.
 - Hooks require `athena` on PATH (or `ATHENA_HOOK_COMMAND`); doctor warns when it is not.
