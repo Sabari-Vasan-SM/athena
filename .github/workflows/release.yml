@@ -37,8 +37,15 @@ jobs:
           PKG="$(node -p "require('./package.json').version")"
           test "$TAG" = "$PKG" || { echo "Tag $TAG does not match package.json $PKG"; exit 1; }
       - name: Publish to npm
-        # Checks already ran above, so skip prepublishOnly.
-        run: npm publish --access public --ignore-scripts
+        # Checks already ran above, so skip prepublishOnly. If this version was
+        # already published manually, skip publishing and still create the release.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if npm view "project-athena@$VERSION" version >/dev/null 2>&1; then
+            echo "project-athena@$VERSION is already on npm; skipping publish."
+          else
+            npm publish --access public --ignore-scripts
+          fi
       - name: Create the GitHub release from CHANGELOG.md
         env:
           GH_TOKEN: ${{ github.token }}

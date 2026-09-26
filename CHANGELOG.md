@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-09-26
 
 - **Website link**: the terminal header, footer and next steps now link to https://athena.sabari.me, which is also the package homepage.
 - **Releases**: the release workflow uses npm trusted publishing (no stored token), adds provenance automatically, and creates a GitHub release from the changelog.
