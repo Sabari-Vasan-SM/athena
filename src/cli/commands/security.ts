@@ -1,9 +1,7 @@
-import path from 'node:path';
-import { ProjectModel } from '../../core/model/project-model.js';
-import { readTextIfExists } from '../../core/util/fs.js';
-import { athenaDir } from '../../core/state/state.js';
+import type { ProjectModel } from '../../core/model/project-model.js';
 import { analyzeProject } from '../../core/analyzer/analyze.js';
-import { loadScan, meetsThreshold, RATED_SEVERITIES, runSecurityScan, saveScan, SEVERITY_ORDER, unratedFindings, type SecurityScan, type Severity } from '../../services/security.js';
+import { projectSession } from '../../services/project-session.js';
+import { meetsThreshold, RATED_SEVERITIES, runSecurityScan, saveScan, SEVERITY_ORDER, unratedFindings, type SecurityScan, type Severity } from '../../services/security.js';
 import { AthenaError, EXIT } from '../../services/errors.js';
 import { requireProjectRoot, type GlobalOptions } from '../context.js';
 import * as ui from '../ui/term.js';
@@ -31,16 +29,8 @@ const TONE: Record<Severity, (s: string) => string> = {
  * re-scans the files.
  */
 async function loadModel(root: string, signal?: AbortSignal): Promise<ProjectModel> {
-  const raw = await readTextIfExists(path.join(athenaDir(root), 'model.json'));
-  if (raw) {
-    try {
-      const parsed = ProjectModel.safeParse(JSON.parse(raw));
-      if (parsed.success) return parsed.data;
-    } catch {
-      /* fall through to a fresh analysis */
-    }
-  }
-  return (await analyzeProject(root, { signal })).model;
+  // A missing or unusable model.json falls back to a fresh analysis.
+  return (await projectSession(root).model()) ?? (await analyzeProject(root, { signal })).model;
 }
 
 const toolLabel = (t: { tool: string; target?: string }) => (t.target ? `${t.tool} (${t.target})` : t.tool);
@@ -112,7 +102,7 @@ export async function securityCommand(opts: SecurityOptions): Promise<number> {
   let model: ProjectModel;
 
   if (opts.last) {
-    scan = await loadScan(root);
+    scan = await projectSession(root).scan();
     if (!scan) throw new AthenaError('No previous scan found.', 'Run `athena security` to scan now.');
     model = await loadModel(root, opts.signal);
   } else {

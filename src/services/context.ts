@@ -1,30 +1,20 @@
 import path from 'node:path';
 import { analyzeProject } from '../core/analyzer/analyze.js';
-import { buildGraph, loadGraph, saveGraph, type ProjectGraph } from '../core/graph/graph.js';
+import { buildGraph, GRAPH_FILE, saveGraph, type ProjectGraph } from '../core/graph/graph.js';
 import { KNOWLEDGE_DOCS, type DocId } from '../core/knowledge/documents.js';
 import { documentSections, formatContext, selectContext, type RelevantContext } from '../core/context/context-engine.js';
-import { ProjectModel } from '../core/model/project-model.js';
-import { athenaDir, readState } from '../core/state/state.js';
+import { athenaDir } from '../core/state/state.js';
 import { readTextIfExists } from '../core/util/fs.js';
 import { AthenaError } from './errors.js';
+import { projectSession } from './project-session.js';
 
 export { formatContext } from '../core/context/context-engine.js';
 export type { RelevantContext } from '../core/context/context-engine.js';
 
-async function loadModel(root: string): Promise<ProjectModel | null> {
-  const raw = await readTextIfExists(path.join(athenaDir(root), 'model.json'));
-  if (!raw) return null;
-  try {
-    const parsed = ProjectModel.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Build (or rebuild) the project graph from the current analysis. */
 export async function refreshGraph(root: string, opts: { signal?: AbortSignal } = {}): Promise<ProjectGraph> {
-  const st = await readState(athenaDir(root));
+  const session = projectSession(root);
+  const st = await session.state();
   const analysis = await analyzeProject(root, { signal: opts.signal, reuse: st.kind === 'ok' ? st.state.fileIndex : undefined });
   const files = analysis.files.map((f) => f.path);
   const graph = await buildGraph(analysis.model, {
@@ -33,11 +23,12 @@ export async function refreshGraph(root: string, opts: { signal?: AbortSignal } 
     read: async (rel) => readTextIfExists(path.join(root, rel)).catch(() => null),
   });
   await saveGraph(root, graph);
+  await session.remember(GRAPH_FILE, graph);
   return graph;
 }
 
 export async function getGraph(root: string, opts: { build?: boolean; signal?: AbortSignal } = {}): Promise<ProjectGraph | null> {
-  const existing = await loadGraph(root);
+  const existing = await projectSession(root).graph();
   if (existing) return existing;
   return opts.build ? refreshGraph(root, { signal: opts.signal }) : null;
 }
@@ -75,6 +66,8 @@ export async function getRelevantContext(root: string, task: string, opts: Conte
 
 /** Summary of the project graph for the UI/CLI. */
 export async function graphSummary(root: string): Promise<{ built: boolean; builtAt: string | null; stats: ProjectGraph['stats'] | null; model: { hasModel: boolean } }> {
-  const graph = await loadGraph(root);
-  return { built: Boolean(graph), builtAt: graph?.builtAt ?? null, stats: graph?.stats ?? null, model: { hasModel: Boolean(await loadModel(root)) } };
+  const session = projectSession(root);
+  // hasModel only needs a stat; parsing the whole model here was wasted work.
+  const [graph, hasModel] = await Promise.all([session.graph(), session.hasModel()]);
+  return { built: Boolean(graph), builtAt: graph?.builtAt ?? null, stats: graph?.stats ?? null, model: { hasModel } };
 }

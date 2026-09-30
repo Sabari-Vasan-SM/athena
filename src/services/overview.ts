@@ -1,8 +1,5 @@
-import path from 'node:path';
-import { ProjectModel } from '../core/model/project-model.js';
-import { athenaDir, readState } from '../core/state/state.js';
-import { readTextIfExists } from '../core/util/fs.js';
 import { AthenaError } from './errors.js';
+import { projectSession } from './project-session.js';
 import { ATHENA_VERSION } from './version.js';
 
 export interface Overview {
@@ -36,21 +33,14 @@ export interface Overview {
 }
 
 export async function getOverview(root: string): Promise<Overview> {
-  const st = await readState(athenaDir(root));
+  const session = projectSession(root);
+  const st = await session.state();
   if (st.kind === 'missing') throw new AthenaError('Athena is not initialized in this project.', 'Run `athena init`.', 3);
   if (st.kind === 'corrupted') throw new AthenaError(`.athena/state.json is corrupted (${st.reason}).`, 'Run `athena analyze` to rebuild it.');
   const state = st.state;
 
-  let model: ProjectModel | null = null;
-  const raw = await readTextIfExists(path.join(athenaDir(root), 'model.json'));
-  if (raw) {
-    try {
-      const parsed = ProjectModel.safeParse(JSON.parse(raw));
-      if (parsed.success) model = parsed.data;
-    } catch {
-      model = null;
-    }
-  }
+  // null when model.json is missing or unusable: the summary is omitted, never guessed.
+  const model = await session.model();
   const uniq = (xs: string[]) => [...new Set(xs)];
   return {
     athenaVersion: ATHENA_VERSION,
