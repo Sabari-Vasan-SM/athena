@@ -1,18 +1,136 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import type { GitInfo } from '../model/project-model.js';
 
 export interface GitResult {
   ok: boolean;
+  /** Exit code; null when git could not be started, timed out, was aborted or exceeded `maxBytes`. */
+  code: number | null;
   stdout: string;
+  stderr: string;
+  /** True when stdout exceeded `maxBytes` and git was stopped (stdout is then incomplete). */
+  overflow?: boolean;
+  /** True when the run was stopped by `signal`. */
+  aborted?: boolean;
+  timedOut?: boolean;
 }
 
-/** Run git with a fixed argv (never through a shell). */
-export function git(cwd: string, args: string[], timeoutMs = 15_000): Promise<GitResult> {
+export interface GitRunOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  /** Stop git and report `overflow` once stdout exceeds this many bytes (default 32 MB). */
+  maxBytes?: number;
+  /** Written to git's stdin. */
+  input?: string;
+}
+
+const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
+const MAX_STDERR_BYTES = 64 * 1024;
+
+/**
+ * Run git with a fixed argv (never through a shell). Never throws: inspect `ok`,
+ * `code` and `stderr`. Use `gitOrThrow` where a failure must not be mistaken for
+ * "no output".
+ */
+export function git(cwd: string, args: string[], opts: number | GitRunOptions = {}): Promise<GitResult> {
+  const o: GitRunOptions = typeof opts === 'number' ? { timeoutMs: opts } : opts;
+  const timeoutMs = o.timeoutMs ?? 15_000;
+  const maxBytes = o.maxBytes ?? DEFAULT_MAX_BYTES;
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } }, (err, stdout) => {
-      resolve({ ok: !err, stdout: typeof stdout === 'string' ? stdout : '' });
+    if (o.signal?.aborted) {
+      resolve({ ok: false, code: null, stdout: '', stderr: '', aborted: true });
+      return;
+    }
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let outBytes = 0;
+    let errBytes = 0;
+    let overflow = false;
+    let timedOut = false;
+    let aborted = false;
+    let settled = false;
+    const child = spawn('git', args, {
+      cwd,
+      windowsHide: true,
+      stdio: [o.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
     });
+    const kill = () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      kill();
+    }, timeoutMs);
+    const onAbort = () => {
+      aborted = true;
+      kill();
+    };
+    o.signal?.addEventListener('abort', onAbort, { once: true });
+    const finish = (code: number | null, spawnError?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      o.signal?.removeEventListener('abort', onAbort);
+      let stderr = Buffer.concat(err).toString('utf8');
+      if (spawnError) stderr = stderr || spawnError.message;
+      if (overflow) stderr = `${stderr}${stderr ? '\n' : ''}output exceeded ${maxBytes} bytes`;
+      if (timedOut) stderr = `${stderr}${stderr ? '\n' : ''}timed out after ${timeoutMs} ms`;
+      const failed = overflow || timedOut || aborted || Boolean(spawnError);
+      resolve({
+        ok: !failed && code === 0,
+        code: failed ? null : code,
+        stdout: Buffer.concat(out).toString('utf8'),
+        stderr,
+        ...(overflow ? { overflow } : {}),
+        ...(aborted ? { aborted } : {}),
+        ...(timedOut ? { timedOut } : {}),
+      });
+    };
+    child.stdout!.on('data', (chunk: Buffer) => {
+      if (overflow) return;
+      outBytes += chunk.length;
+      if (outBytes > maxBytes) {
+        overflow = true;
+        kill();
+        return;
+      }
+      out.push(chunk);
+    });
+    child.stderr!.on('data', (chunk: Buffer) => {
+      if (errBytes >= MAX_STDERR_BYTES) return;
+      errBytes += chunk.length;
+      err.push(chunk);
+    });
+    child.on('error', (e) => finish(null, e));
+    child.on('close', (code) => finish(code));
+    if (o.input !== undefined) {
+      child.stdin!.on('error', () => {});
+      child.stdin!.end(o.input);
+    }
   });
+}
+
+/** Thrown by `gitOrThrow`. Services turn it into a user-facing error. */
+export class GitCommandError extends Error {
+  constructor(
+    readonly args: string[],
+    readonly result: GitResult,
+  ) {
+    const detail = result.stderr.trim().split('\n').filter(Boolean).slice(-1)[0]?.slice(0, 300);
+    super(`git ${args.find((a) => !a.startsWith('-') && !a.includes('=')) ?? args[0]} failed${detail ? `: ${detail}` : result.code !== null ? ` (exit ${result.code})` : ''}`);
+    this.name = 'GitCommandError';
+  }
+}
+
+/**
+ * Run git and return stdout, throwing when git fails, times out, is aborted or its
+ * output exceeds `maxBytes`. An abort rethrows the signal's reason.
+ */
+export async function gitOrThrow(cwd: string, args: string[], opts: GitRunOptions = {}): Promise<string> {
+  const r = await git(cwd, args, opts);
+  if (r.aborted) throw opts.signal?.reason ?? new Error('Aborted');
+  if (!r.ok) throw new GitCommandError(args, r);
+  return r.stdout;
 }
 
 export async function gitAvailable(): Promise<boolean> {
@@ -97,27 +215,39 @@ function stripPrefix(files: ChangedFile[], prefix: string): ChangedFile[] {
     .map((f) => ({ ...f, path: f.path.slice(prefix.length), from: f.from?.startsWith(prefix) ? f.from.slice(prefix.length) : f.from }));
 }
 
-/** Files changed in commits between `fromRef` and HEAD. */
+/**
+ * Files changed on HEAD since it diverged from `fromRef` (`merge-base..HEAD`, the
+ * same range a pull request shows). Returns null when the range can't be computed.
+ */
 export async function changesSince(cwd: string, fromRef: string): Promise<ChangedFile[] | null> {
   // Accept commit SHAs and ordinary ref expressions (HEAD~1, origin/main, v1.2.3),
   // but never anything that could be read as an option or shell metacharacter.
   if (!isSafeRef(fromRef)) return null;
-  const r = await git(cwd, ['diff', '--name-status', '-M', '-z', `${fromRef}..HEAD`, '--', '.']);
+  const mb = await git(cwd, ['merge-base', fromRef, 'HEAD']);
+  if (!mb.ok || !mb.stdout.trim()) return null;
+  const r = await git(cwd, ['diff', '--name-status', '-M', '-z', '--relative', '--no-color', mb.stdout.trim(), 'HEAD', '--', '.']);
   if (!r.ok) return null;
-  const prefix = await repoPrefix(cwd);
+  return parseNameStatusZ(r.stdout);
+}
+
+/** Parse `git diff --name-status -z` output. */
+export function parseNameStatusZ(stdout: string): ChangedFile[] {
   const out: ChangedFile[] = [];
-  const parts = r.stdout.split('\0').filter(Boolean);
+  const parts = stdout.split('\0').filter(Boolean);
   for (let i = 0; i < parts.length; i++) {
     const code = parts[i]!;
-    if (code.startsWith('R')) {
+    if (code.startsWith('R') || code.startsWith('C')) {
       const from = parts[++i];
-      out.push({ path: parts[++i]!, status: 'renamed', from });
+      const to = parts[++i];
+      if (to === undefined) break;
+      out.push(code.startsWith('R') ? { path: to, status: 'renamed', from } : { path: to, status: 'added' });
     } else {
-      const p = parts[++i]!;
+      const p = parts[++i];
+      if (p === undefined) break;
       out.push({ path: p, status: code === 'A' ? 'added' : code === 'D' ? 'deleted' : code === 'M' ? 'modified' : 'other' });
     }
   }
-  return stripPrefix(out, prefix);
+  return out;
 }
 
 /** Conservative allowlist for user-supplied git refs. */

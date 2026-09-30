@@ -336,6 +336,22 @@ const PARSERS: Array<[RegExp, (ctx: AnalysisContext, p: string) => Promise<Parse
   [/(^|\/)mix\.exs$/, parseMix],
 ];
 
+/**
+ * Dependency names (runtime and dev) declared by a manifest, parsed from `text` with
+ * the same parsers the analyzer uses. Null when the file type is not supported or
+ * the text can't be parsed; an empty file yields an empty set.
+ */
+export async function manifestDependencyNames(p: string, text: string): Promise<Set<string> | null> {
+  const parser = PARSERS.find(([re]) => re.test(p))?.[1];
+  if (!parser) return null;
+  if (!text.trim()) return new Set();
+  let failed = false;
+  const ctx = { read: async () => text, warn: () => (failed = true) } as unknown as AnalysisContext;
+  const r = await parser(ctx, p);
+  if (!r || failed) return null;
+  return new Set([...r.manifest.dependencies, ...r.manifest.devDependencies]);
+}
+
 const LOCKFILES: Array<[RegExp, string]> = [
   [/(^|\/)package-lock\.json$/, 'npm'],
   [/(^|\/)npm-shrinkwrap\.json$/, 'npm'],

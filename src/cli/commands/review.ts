@@ -6,6 +6,7 @@ import * as ui from '../ui/term.js';
 
 export interface ReviewOptions extends GlobalOptions {
   base?: string;
+  staged?: boolean;
   noSync?: boolean;
   noFail?: boolean;
   signal?: AbortSignal;
@@ -24,6 +25,7 @@ export async function reviewCommand(opts: ReviewOptions): Promise<number> {
   try {
     result = await reviewChanges(root, {
       base: opts.base,
+      staged: opts.staged,
       signal: opts.signal,
       checkSync: opts.noSync ? undefined : async (r) => staleForCheck(await planSync(r, { signal: opts.signal })).length === 0,
     });
@@ -41,10 +43,10 @@ export async function reviewCommand(opts: ReviewOptions): Promise<number> {
   ui.heading('Athena Review');
   ui.line();
   if (!result.changedFiles.length) {
-    ui.line(ui.dim(opts.base ? `No changes between ${opts.base} and HEAD.` : 'No uncommitted changes.'));
+    ui.line(ui.dim(opts.base ? `No changes between ${opts.base} and HEAD.` : opts.staged ? 'No staged changes.' : 'No uncommitted changes.'));
     return EXIT.OK;
   }
-  ui.line(`${result.stats.files} file${result.stats.files === 1 ? '' : 's'} changed ${ui.dim(`(${ui.c.green(`+${result.stats.added}`)} ${ui.c.red(`−${result.stats.removed}`)}${opts.base ? ` vs ${opts.base}` : ' in the working tree'})`)}`);
+  ui.line(`${result.stats.files} file${result.stats.files === 1 ? '' : 's'} changed ${ui.dim(`(${ui.c.green(`+${result.stats.added}`)} ${ui.c.red(`−${result.stats.removed}`)}${opts.base ? ` vs ${opts.base}` : opts.staged ? ' staged' : ' in the working tree'})`)}`);
   ui.line();
 
   if (result.findings.length) {
@@ -55,7 +57,7 @@ export async function reviewCommand(opts: ReviewOptions): Promise<number> {
       if (f.files.length > 6) ui.line(ui.dim(`    +${f.files.length - 6} more`));
       if (f.hint) ui.line(`    ${ui.dim(f.hint)}`);
     }
-  } else {
+  } else if (!result.incomplete) {
     ui.ok('Automated checks found nothing to flag.');
   }
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- `athena review` scans each run of consecutive added lines as one block, so multi-line secrets such as PEM private keys are now flagged (at the line where they start, never with the value).
+- `athena review` fails closed on Git errors: a failing `git` command, an unknown `--base`, or a missing merge base (shallow clone) is now an error (exit 2) instead of an empty, "clean" review. Ctrl+C stops running `git` processes.
+- The diff is streamed with a 64 MB budget; a larger diff fails the review instead of being silently truncated.
+- `--base` now compares `merge-base(base, HEAD)..HEAD` for both the file list and the patch, so commits that exist only on the base branch no longer appear in the review.
+- The dependency check uses the analyzer's manifest parsers (`name =` / `version =` are no longer reported as dependencies), and a new manifest reports all of its dependencies.
+- New `athena review --staged` reviews the index (contents read from Git, untracked files ignored). The `--review` pre-commit hook now runs `athena review --staged --no-sync`, so unstaged or untracked files (such as a local `.env`) no longer block commits while staged secrets still do, and a review that can't run blocks the commit with its own message. Re-run `athena git-hook install --review` to update an installed hook.
+- Untracked files are read once, never through a symlink that points outside the project, and only up to 512 KB. Files that could not be checked are listed in a `skipped` warning (JSON: `incomplete`, `skipped`), and the review no longer says it found nothing to flag.
+
+### Breaking
+
+- `athena review --base <ref>` exits with code 2 when the base can't be resolved or has no merge base with HEAD. Shallow CI clones need full history, e.g. `actions/checkout` with `fetch-depth: 0`.
+
 ## 0.2.0 — 2026-09-26
 
 - **Website link**: the terminal header, footer and next steps now link to https://athena.sabari.me, which is also the package homepage.

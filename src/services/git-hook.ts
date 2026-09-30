@@ -85,10 +85,14 @@ export function renderHookBlock(opts: { projectPrefix: string; review: boolean; 
   if (opts.review) {
     lines.push(
       '  athena_rc=0',
-      `  athena_out=$(${athena} review --no-sync 2>&1) || athena_rc=$?`,
-      '  if [ "$athena_rc" -ne 0 ] && [ "$athena_rc" -ne 3 ]; then',
+      `  athena_out=$(${athena} review --staged --no-sync 2>&1) || athena_rc=$?`,
+      '  if [ "$athena_rc" -eq 1 ]; then',
       `    printf '%s\\n' "$athena_out" >&2`,
       "    echo 'athena: commit blocked: `athena review` found blockers (possible secrets or env files). Fix them, or skip once with `git commit --no-verify`.' >&2",
+      '    exit 1',
+      '  elif [ "$athena_rc" -ne 0 ] && [ "$athena_rc" -ne 3 ]; then',
+      `    printf '%s\\n' "$athena_out" >&2`,
+      "    echo 'athena: commit blocked: `athena review` could not check the staged changes. Fix the error above, or skip once with `git commit --no-verify`.' >&2",
       '    exit 1',
       '  fi',
     );

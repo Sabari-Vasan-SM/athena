@@ -155,9 +155,10 @@ export function buildProgram(): Command {
     .command('review')
     .description('Check the current diff for facts worth reviewing, and list the project rules and checklist')
     .option('--base <ref>', 'Compare against this Git ref instead of the working tree')
+    .option('--staged', 'Review only what is staged for commit (used by the pre-commit hook)')
     .option('--no-sync', 'Skip the knowledge freshness check')
     .option('--no-fail', 'Always exit 0, even when blockers are found')
-    .action(run(async (o: { base?: string; sync?: boolean; fail?: boolean }, cmd: Command) => reviewCommand({ ...globals(cmd), base: o.base, noSync: o.sync === false, noFail: o.fail === false, signal: controller.signal })));
+    .action(run(async (o: { base?: string; staged?: boolean; sync?: boolean; fail?: boolean }, cmd: Command) => reviewCommand({ ...globals(cmd), base: o.base, staged: o.staged, noSync: o.sync === false, noFail: o.fail === false, signal: controller.signal })));
 
   program
     .command('status')
