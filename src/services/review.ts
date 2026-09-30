@@ -8,6 +8,7 @@ import { athenaDir } from '../core/state/state.js';
 import { readTextIfExists, readTextInsideRoot } from '../core/util/fs.js';
 import { AthenaError, EXIT } from './errors.js';
 import { loadScan } from '../core/model/security-scan.js';
+import { API_ROUTE_PATH, AUTH_PATH, SCHEMA_PATH, SOURCE_FILE, TEST_FILE } from '../core/patterns.js';
 
 export type FindingLevel = 'blocker' | 'warning' | 'info';
 
@@ -45,11 +46,6 @@ export interface ReviewResult {
   skipped: SkippedFile[];
 }
 
-const TEST_FILE = /(^|\/)(__tests__|tests?|spec|specs|e2e)\/|\.(test|spec|e2e)\.[cm]?[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go|exs)$|_spec\.rb$|Tests?\.(java|kt|cs)$/;
-const SOURCE_FILE = /\.(m|c)?(t|j)sx?$|\.(py|go|rs|java|kt|cs|php|rb|dart|ex|swift|vue|svelte)$/;
-const ROUTE_FILE = /(^|\/)(routes?|controllers?|handlers?|api|endpoints?|resolvers?)\/|(^|\/)(urls\.py|routes\.rb)$|(^|\/)app\/(.+\/)?route\.(t|j)sx?$/i;
-const SCHEMA_FILE = /\.prisma$|\.sql$|(^|\/)(migrations?|migrate|alembic)\/|(^|\/)models(\.py|\/)/i;
-const AUTH_FILE = /(auth|session|login|oauth|jwt|guard|permission|rbac|acl|polic(y|ies)|middleware)/i;
 const ENV_FILE = /(^|\/)\.env(\.(local|production|development|prod|dev|staging))?$/;
 const MANIFEST_FILE = /(^|\/)(package\.json|pyproject\.toml|requirements[^/]*\.txt|go\.mod|Cargo\.toml|composer\.json|Gemfile|pubspec\.yaml|pom\.xml|build\.gradle(\.kts)?)$/;
 /** Untracked files above this size are reported as large and not read. */
@@ -365,11 +361,11 @@ async function review(root: string, opts: ReviewOptions): Promise<ReviewResult> 
   }
 
   // 5. Routes / schema / auth touchpoints
-  const routeFiles = changedSource.filter((p) => ROUTE_FILE.test(p));
+  const routeFiles = changedSource.filter((p) => API_ROUTE_PATH.test(p));
   if (routeFiles.length) add({ level: 'info', check: 'api', message: 'API surface changed', files: routeFiles.slice(0, 10), hint: 'Check auth/authorization and error handling (`.athena/api.md`, `.athena/auth.md`).' });
-  const schemaFiles = paths.filter((p) => SCHEMA_FILE.test(p));
+  const schemaFiles = paths.filter((p) => SCHEMA_PATH.test(p));
   if (schemaFiles.length) add({ level: 'info', check: 'database', message: 'Database schema or migrations changed', files: schemaFiles.slice(0, 10), hint: 'Check indexes, constraints and backward compatibility (`.athena/database.md`).' });
-  const authFiles = changedSource.filter((p) => AUTH_FILE.test(p));
+  const authFiles = changedSource.filter((p) => AUTH_PATH.test(p));
   if (authFiles.length) add({ level: 'warning', check: 'auth', message: 'Authentication/authorization code changed', files: authFiles.slice(0, 10), hint: 'Review against `.athena/auth.md` and `.athena/security.md`.' });
 
   // 6. Large added files
