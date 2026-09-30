@@ -9,3 +9,4 @@ ai-suggestions.md
 .server.json
 .sync-ignore.json
 .agent-events.jsonl
+local.json

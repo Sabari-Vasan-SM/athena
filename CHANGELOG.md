@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 — 2026-09-30
+
+Security release. Upgrading is recommended for everyone. After upgrading, run `athena sync` once (the `security.md` format changed) and, if you use the pre-commit hook with `--review`, run `athena git-hook install --review` again so it reviews staged changes.
 
 ### Breaking
 
