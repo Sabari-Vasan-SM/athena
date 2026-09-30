@@ -1,0 +1,4 @@
+{"config":{"protocol_version":"v1.0.0","scanner_name":"govulncheck","scanner_version":"v1.0.0","db":"https://vuln.go.dev","go_version":"go1.21.0","scan_level":"symbol"}}
+{"progress":{"message":"Scanning your code and 5 packages across 1 dependent module for known vulnerabilities..."}}
+{"osv":{"id":"GO-2022-1059","summary":"Denial of service via crafted Accept-Language header in golang.org/x/text/language","affected":[{"package":{"name":"golang.org/x/text","ecosystem":"Go"}}]}}
+{"finding":{"osv":"GO-2022-1059","fixed_version":"v0.3.8","trace":[{"module":"golang.org/x/text","version":"v0.3.7","package":"golang.org/x/text/language","function":"Parse"}]}}

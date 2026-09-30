@@ -73,7 +73,11 @@ export const SecretFinding = z.object({
   type: z.string(),
   file: z.string(),
   line: z.number().int(),
-  /** Short sha256 prefix of the matched value — allows dedup without storing the secret. */
+  /**
+   * Keyed fingerprint (HMAC with the machine-local salt in .athena/local.json, or a
+   * per-process key) — allows dedup without storing the secret. Never a plain hash
+   * of the value, and never written to committed files.
+   */
   fingerprint: z.string(),
 });
 

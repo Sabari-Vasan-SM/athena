@@ -149,7 +149,8 @@ export function buildProgram(): Command {
     .option('--no-audit', 'Skip dependency audits (report secrets only)')
     .option('--fail-on <severity>', 'Exit 1 when a finding at or above this severity exists (critical, high, moderate, low)')
     .option('--last', 'Show the last scan instead of running a new one')
-    .action(run(async (o: { audit?: boolean; failOn?: string; last?: boolean }, cmd: Command) => securityCommand({ ...globals(cmd), noAudit: o.audit === false, failOn: o.failOn, last: o.last, signal: controller.signal })));
+    .option('--unrated <policy>', 'With --fail-on: "fail" (default) also fails on findings the tool did not rate (pip-audit, govulncheck); "warn" only reports them', 'fail')
+    .action(run(async (o: { audit?: boolean; failOn?: string; last?: boolean; unrated?: string }, cmd: Command) => securityCommand({ ...globals(cmd), noAudit: o.audit === false, failOn: o.failOn, unrated: o.unrated, last: o.last, signal: controller.signal })));
 
   program
     .command('review')

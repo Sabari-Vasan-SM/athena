@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { isSecretLikeName, redact, scanText, shannonEntropy } from '../../src/core/security/secrets.js';
+import { keyedFingerprint } from '../../src/core/local-config.js';
 import { FAKE } from '../helpers.js';
 
 describe('secret scanner', () => {
@@ -14,7 +16,7 @@ describe('secret scanner', () => {
   ])('detects %s', (type, text) => {
     const found = scanText(text);
     expect(found.map((f) => f.type)).toContain(type);
-    expect(found[0]!.fingerprint).toMatch(/^[a-f0-9]{12}$/);
+    expect(found[0]!.fingerprint).toMatch(/^[a-f0-9]{16}$/);
   });
 
   it.each([
@@ -40,6 +42,38 @@ describe('secret scanner', () => {
     expect(out).not.toContain(FAKE.dbPassword);
     expect(out).not.toContain(FAKE.github);
     expect(out).toContain('postgres://app:<redacted>@db:5432/app');
+  });
+
+  it('never fingerprints with an unsalted hash of the value', () => {
+    const [m] = scanText(`const k = "${FAKE.stripe}";`);
+    const plain = createHash('sha256').update(FAKE.stripe).digest('hex');
+    expect(plain.startsWith(m!.fingerprint)).toBe(false);
+    expect(plain).not.toContain(m!.fingerprint);
+    // Stable within a process, so callers can still compare findings.
+    expect(scanText(`x = "${FAKE.stripe}"`)[0]!.fingerprint).toBe(m!.fingerprint);
+  });
+
+  it('uses a caller-supplied keyed fingerprint', () => {
+    const salt = 'a'.repeat(64);
+    const [m] = scanText(`const k = "${FAKE.stripe}";`, { fingerprint: (v) => keyedFingerprint(salt, v) });
+    expect(m!.fingerprint).toBe(keyedFingerprint(salt, FAKE.stripe));
+  });
+
+  it('keeps generic assignment true positives across quoting styles', () => {
+    for (const text of [
+      `"clientSecret": "Zq8#mK2$vL9pW4xT7nB1"`,
+      `db_password: 'Zq8#mK2$vL9pW4xT7nB1'`,
+      `config.auth.api_key = \`Zq8#mK2$vL9pW4xT7nB1\``,
+      `export const ACCESS_KEY="Zq8#mK2$vL9pW4xT7nB1"`,
+    ]) {
+      expect(scanText(text).map((f) => f.type), text).toContain('generic-secret-assignment');
+    }
+    expect(scanText(`const username = "Zq8#mK2$vL9pW4xT7nB1";`)).toEqual([]);
+  });
+
+  it('detects env-style secret assignments, including CRLF files', () => {
+    expect(scanText('export STRIPE_SECRET=Zq8mK2vL9pW4xT7n\r\nPORT=3000\r\n').map((f) => f.type)).toEqual(['env-secret-assignment']);
+    expect(scanText('LOG_LEVEL=Zq8mK2vL9pW4xT7n\n')).toEqual([]);
   });
 
   it('computes entropy', () => {
