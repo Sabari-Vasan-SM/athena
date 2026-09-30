@@ -46,6 +46,12 @@ export async function readLocalConfig(root: string): Promise<LocalConfig> {
 }
 
 export async function writeLocalConfig(root: string, cfg: LocalConfig): Promise<void> {
+  // Make sure Git ignores this file before it exists, even in projects set up by older versions.
+  const ignoreFile = path.join(root, ATHENA_DIR, '.gitignore');
+  const ignore = await readTextIfExists(ignoreFile);
+  if (!ignore?.split(/\r?\n/).includes(LOCAL_CONFIG_FILE)) {
+    await writeFileAtomic(ignoreFile, `${(ignore ?? '').replace(/\s*$/, '')}${ignore ? '\n' : ''}${LOCAL_CONFIG_FILE}\n`);
+  }
   await writeFileAtomic(localPath(root), `${JSON.stringify(cfg, null, 2)}\n`);
 }
 
