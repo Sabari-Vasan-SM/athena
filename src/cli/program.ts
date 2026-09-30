@@ -3,24 +3,6 @@ import { ATHENA_VERSION } from '../services/version.js';
 import { AthenaError, EXIT } from '../services/errors.js';
 import * as ui from './ui/term.js';
 import type { GlobalOptions } from './context.js';
-import { initCommand } from './commands/init.js';
-import { analyzeCommand } from './commands/analyze.js';
-import { statusCommand } from './commands/status.js';
-import { doctorCommand } from './commands/doctor.js';
-import { rulesAddCommand, rulesDisableCommand, rulesEditCommand, rulesEnableCommand, rulesListCommand, rulesRemoveCommand } from './commands/rules.js';
-import { cleanCommand } from './commands/clean.js';
-import { openCommand } from './commands/open.js';
-import { syncCommand } from './commands/sync.js';
-import { eventCommand } from './commands/event.js';
-import { activityCommand } from './commands/activity.js';
-import { securityCommand } from './commands/security.js';
-import { reviewCommand } from './commands/review.js';
-import { architectureCommand, contextCommand, graphCommand } from './commands/context.js';
-import { aiEnrichCommand, aiStatusCommand } from './commands/ai.js';
-import { mcpCommand } from './commands/mcp.js';
-import { watchCommand } from './commands/watch.js';
-import { gitHookInstallCommand, gitHookStatusCommand, gitHookUninstallCommand } from './commands/git-hook.js';
-import { agentsAddCommand, agentsListCommand, agentsRemoveCommand } from './commands/agents.js';
 
 const controller = new AbortController();
 let interrupted = false;
@@ -79,7 +61,7 @@ export function buildProgram(): Command {
     .action(
       run(async (cmdOpts: { agents?: string | boolean; dryRun?: boolean }, cmd: Command) => {
         const g = globals(cmd);
-        await initCommand({ ...g, agents: typeof cmdOpts.agents === 'string' ? cmdOpts.agents : undefined, noAgents: cmdOpts.agents === false, dryRun: cmdOpts.dryRun, signal: controller.signal });
+        await (await import('./commands/init.js')).initCommand({ ...g, agents: typeof cmdOpts.agents === 'string' ? cmdOpts.agents : undefined, noAgents: cmdOpts.agents === false, dryRun: cmdOpts.dryRun, signal: controller.signal });
       }),
     );
 
@@ -88,7 +70,7 @@ export function buildProgram(): Command {
     .description('Re-analyze the project and refresh generated knowledge (developer edits are preserved)')
     .option('--force', 'Regenerate sections even if they were edited by hand')
     .option('--agents <list>', 'Reconfigure these agent integrations')
-    .action(run(async (o: { force?: boolean; agents?: string }, cmd: Command) => analyzeCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+    .action(run(async (o: { force?: boolean; agents?: string }, cmd: Command) => (await import('./commands/analyze.js')).analyzeCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
     .command('sync')
@@ -98,21 +80,21 @@ export function buildProgram(): Command {
     .option('--check', 'Exit with code 1 if knowledge is out of date (for CI/hooks)')
     .option('--diff', 'Print full diffs of proposed document changes')
     .option('--force', 'Also regenerate sections that were edited by hand')
-    .action(run(async (o: { yes?: boolean; dryRun?: boolean; check?: boolean; diff?: boolean; force?: boolean }, cmd: Command) => syncCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+    .action(run(async (o: { yes?: boolean; dryRun?: boolean; check?: boolean; diff?: boolean; force?: boolean }, cmd: Command) => (await import('./commands/sync.js')).syncCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
     .command('watch')
     .description('Watch the project and propose knowledge updates as files change')
     .option('--auto-apply', 'Apply updates automatically instead of proposing them')
     .option('--debounce <ms>', 'Quiet period before checking changes (default 1500)')
-    .action(run(async (o: { autoApply?: boolean; debounce?: string }, cmd: Command) => watchCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+    .action(run(async (o: { autoApply?: boolean; debounce?: string }, cmd: Command) => (await import('./commands/watch.js')).watchCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
     .command('context <task>')
     .description('Show which knowledge an agent should read for a task (deterministic)')
     .option('--full', 'Print the full context an agent would receive')
     .option('--max-chars <n>', 'Character budget for selected sections')
-    .action(run(async (task: string, o: { full?: boolean; maxChars?: string }, cmd: Command) => contextCommand(task, { ...globals(cmd), ...o, signal: controller.signal })));
+    .action(run(async (task: string, o: { full?: boolean; maxChars?: string }, cmd: Command) => (await import('./commands/context.js')).contextCommand(task, { ...globals(cmd), ...o, signal: controller.signal })));
 
   program
     .command('graph')
@@ -121,27 +103,27 @@ export function buildProgram(): Command {
     .option('--node <id>', 'Show one node and its relationships')
     .option('--kind <kind>', 'Filter by node kind (package, file, route, entity, framework, command, infra)')
     .option('--search <term>', 'Filter nodes by name or path')
-    .action(run(async (o: { build?: boolean; node?: string; kind?: string; search?: string }, cmd: Command) => graphCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+    .action(run(async (o: { build?: boolean; node?: string; kind?: string; search?: string }, cmd: Command) => (await import('./commands/context.js')).graphCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
     .command('architecture')
     .description('Summarize the project graph')
-    .action(run(async (_o: unknown, cmd: Command) => architectureCommand({ ...globals(cmd), signal: controller.signal })));
+    .action(run(async (_o: unknown, cmd: Command) => (await import('./commands/context.js')).architectureCommand({ ...globals(cmd), signal: controller.signal })));
 
   program
     .command('mcp')
     .description('Serve Athena project intelligence over MCP (stdio) for AI agents')
     .option('--allow-write', 'Permit the update_knowledge tool to apply changes (read-only by default)')
-    .action(run(async (o: { allowWrite?: boolean }, cmd: Command) => mcpCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+    .action(run(async (o: { allowWrite?: boolean }, cmd: Command) => (await import('./commands/mcp.js')).mcpCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   const ai = program.command('ai').description('Optional AI provider integration (never required)');
-  ai.command('status', { isDefault: true }).description('Show configured and available AI providers').action(run(async (_o: unknown, cmd: Command) => aiStatusCommand(globals(cmd))));
+  ai.command('status', { isDefault: true }).description('Show configured and available AI providers').action(run(async (_o: unknown, cmd: Command) => (await import('./commands/ai.js')).aiStatusCommand(globals(cmd))));
   ai.command('enrich')
     .description('Ask the configured provider for INFERRED suggestions based on your knowledge documents')
     .option('--docs <list>', 'Documents to send (default: project,architecture,database,api)')
     .option('--consent', 'Consent to sending redacted knowledge to a remote provider for this run')
     .option('--dry-run', 'Show exactly what would be sent, and send nothing')
-    .action(run(async (o: { docs?: string; consent?: boolean; dryRun?: boolean }, cmd: Command) => aiEnrichCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+    .action(run(async (o: { docs?: string; consent?: boolean; dryRun?: boolean }, cmd: Command) => (await import('./commands/ai.js')).aiEnrichCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
     .command('security')
@@ -150,7 +132,7 @@ export function buildProgram(): Command {
     .option('--fail-on <severity>', 'Exit 1 when a finding at or above this severity exists (critical, high, moderate, low)')
     .option('--last', 'Show the last scan instead of running a new one')
     .option('--unrated <policy>', 'With --fail-on: "fail" (default) also fails on findings the tool did not rate (pip-audit, govulncheck); "warn" only reports them', 'fail')
-    .action(run(async (o: { audit?: boolean; failOn?: string; last?: boolean; unrated?: string }, cmd: Command) => securityCommand({ ...globals(cmd), noAudit: o.audit === false, failOn: o.failOn, unrated: o.unrated, last: o.last, signal: controller.signal })));
+    .action(run(async (o: { audit?: boolean; failOn?: string; last?: boolean; unrated?: string }, cmd: Command) => (await import('./commands/security.js')).securityCommand({ ...globals(cmd), noAudit: o.audit === false, failOn: o.failOn, unrated: o.unrated, last: o.last, signal: controller.signal })));
 
   program
     .command('review')
@@ -159,39 +141,39 @@ export function buildProgram(): Command {
     .option('--staged', 'Review only what is staged for commit (used by the pre-commit hook)')
     .option('--no-sync', 'Skip the knowledge freshness check')
     .option('--no-fail', 'Always exit 0, even when blockers are found')
-    .action(run(async (o: { base?: string; staged?: boolean; sync?: boolean; fail?: boolean }, cmd: Command) => reviewCommand({ ...globals(cmd), base: o.base, staged: o.staged, noSync: o.sync === false, noFail: o.fail === false, signal: controller.signal })));
+    .action(run(async (o: { base?: string; staged?: boolean; sync?: boolean; fail?: boolean }, cmd: Command) => (await import('./commands/review.js')).reviewCommand({ ...globals(cmd), base: o.base, staged: o.staged, noSync: o.sync === false, noFail: o.fail === false, signal: controller.signal })));
 
   program
     .command('status')
     .description('Show knowledge health and changes since the last analysis')
-    .action(run(async (_o: unknown, cmd: Command) => statusCommand({ ...globals(cmd), signal: controller.signal })));
+    .action(run(async (_o: unknown, cmd: Command) => (await import('./commands/status.js')).statusCommand({ ...globals(cmd), signal: controller.signal })));
 
   program
     .command('doctor')
     .description('Check the Athena installation, project and integrations')
-    .action(run(async (_o: unknown, cmd: Command) => doctorCommand(globals(cmd))));
+    .action(run(async (_o: unknown, cmd: Command) => (await import('./commands/doctor.js')).doctorCommand(globals(cmd))));
 
   const rules = program.command('rules').description('List and edit project rules (.athena/rules.md)');
-  rules.command('list', { isDefault: true }).description('List rules with their numbers').action(run(async (_o: unknown, cmd: Command) => rulesListCommand(globals(cmd))));
-  rules.command('add <text>').description('Add a rule').option('-s, --section <name>', 'Section heading', 'General').action(run(async (text: string, o: { section?: string }, cmd: Command) => rulesAddCommand(text, { ...globals(cmd), ...o })));
-  rules.command('edit <number> <text>').description('Replace the text of a rule').action(run(async (n: string, text: string, _o: unknown, cmd: Command) => rulesEditCommand(n, text, globals(cmd))));
-  rules.command('enable <number>').description('Enable a rule').action(run(async (n: string, _o: unknown, cmd: Command) => rulesEnableCommand(n, globals(cmd))));
-  rules.command('disable <number>').description('Disable a rule without deleting it').action(run(async (n: string, _o: unknown, cmd: Command) => rulesDisableCommand(n, globals(cmd))));
-  rules.command('remove <number>').description('Delete a rule').action(run(async (n: string, _o: unknown, cmd: Command) => rulesRemoveCommand(n, globals(cmd))));
+  rules.command('list', { isDefault: true }).description('List rules with their numbers').action(run(async (_o: unknown, cmd: Command) => (await import('./commands/rules.js')).rulesListCommand(globals(cmd))));
+  rules.command('add <text>').description('Add a rule').option('-s, --section <name>', 'Section heading', 'General').action(run(async (text: string, o: { section?: string }, cmd: Command) => (await import('./commands/rules.js')).rulesAddCommand(text, { ...globals(cmd), ...o })));
+  rules.command('edit <number> <text>').description('Replace the text of a rule').action(run(async (n: string, text: string, _o: unknown, cmd: Command) => (await import('./commands/rules.js')).rulesEditCommand(n, text, globals(cmd))));
+  rules.command('enable <number>').description('Enable a rule').action(run(async (n: string, _o: unknown, cmd: Command) => (await import('./commands/rules.js')).rulesEnableCommand(n, globals(cmd))));
+  rules.command('disable <number>').description('Disable a rule without deleting it').action(run(async (n: string, _o: unknown, cmd: Command) => (await import('./commands/rules.js')).rulesDisableCommand(n, globals(cmd))));
+  rules.command('remove <number>').description('Delete a rule').action(run(async (n: string, _o: unknown, cmd: Command) => (await import('./commands/rules.js')).rulesRemoveCommand(n, globals(cmd))));
 
   const agents = program.command('agents').description('Manage AI agent integrations');
-  agents.command('list', { isDefault: true }).description('Show supported agents and integration status').action(run(async (_o: unknown, cmd: Command) => agentsListCommand(globals(cmd))));
-  agents.command('add <agents...>').description('Configure integrations (claude-code, cursor, codex, copilot, gemini-cli, antigravity, windsurf, cline, agents-md, or "all")').action(run(async (names: string[], _o: unknown, cmd: Command) => agentsAddCommand(names, globals(cmd))));
-  agents.command('remove <agents...>').description('Remove Athena-managed integration files/blocks').action(run(async (names: string[], _o: unknown, cmd: Command) => agentsRemoveCommand(names, globals(cmd))));
+  agents.command('list', { isDefault: true }).description('Show supported agents and integration status').action(run(async (_o: unknown, cmd: Command) => (await import('./commands/agents.js')).agentsListCommand(globals(cmd))));
+  agents.command('add <agents...>').description('Configure integrations (claude-code, cursor, codex, copilot, gemini-cli, antigravity, windsurf, cline, agents-md, or "all")').action(run(async (names: string[], _o: unknown, cmd: Command) => (await import('./commands/agents.js')).agentsAddCommand(names, globals(cmd))));
+  agents.command('remove <agents...>').description('Remove Athena-managed integration files/blocks').action(run(async (names: string[], _o: unknown, cmd: Command) => (await import('./commands/agents.js')).agentsRemoveCommand(names, globals(cmd))));
 
   const gitHook = program.command('git-hook').description('Install a Git pre-commit hook that blocks commits when knowledge is out of date');
-  gitHook.command('status', { isDefault: true }).description('Show whether the Athena pre-commit hook is installed').action(run(async (_o: unknown, cmd: Command) => gitHookStatusCommand(globals(cmd))));
+  gitHook.command('status', { isDefault: true }).description('Show whether the Athena pre-commit hook is installed').action(run(async (_o: unknown, cmd: Command) => (await import('./commands/git-hook.js')).gitHookStatusCommand(globals(cmd))));
   gitHook
     .command('install')
     .description('Add the Athena pre-commit hook (existing hooks are kept; Athena adds a marked block)')
     .option('--review', 'Also run `athena review` and block commits with possible secrets or env files')
-    .action(run(async (o: { review?: boolean }, cmd: Command) => gitHookInstallCommand({ ...globals(cmd), review: o.review })));
-  gitHook.command('uninstall').description("Remove Athena's pre-commit hook or block").action(run(async (_o: unknown, cmd: Command) => gitHookUninstallCommand(globals(cmd))));
+    .action(run(async (o: { review?: boolean }, cmd: Command) => (await import('./commands/git-hook.js')).gitHookInstallCommand({ ...globals(cmd), review: o.review })));
+  gitHook.command('uninstall').description("Remove Athena's pre-commit hook or block").action(run(async (_o: unknown, cmd: Command) => (await import('./commands/git-hook.js')).gitHookUninstallCommand(globals(cmd))));
 
   program
     .command('open')
@@ -201,14 +183,14 @@ export function buildProgram(): Command {
     .option('--allow-remote', 'Allow binding to a non-loopback interface')
     .option('--no-open', 'Do not launch a browser')
     .option('--no-watch', 'Do not watch the project for changes')
-    .action(run(async (o: { port?: string; host?: string; open?: boolean; allowRemote?: boolean; watch?: boolean }, cmd: Command) => openCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+    .action(run(async (o: { port?: string; host?: string; open?: boolean; allowRemote?: boolean; watch?: boolean }, cmd: Command) => (await import('./commands/open.js')).openCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
     .command('activity')
     .description('Show AI agent activity observed through hooks')
     .option('-n, --limit <count>', 'Number of events to show (default 30)')
     .option('--agent <id>', 'Only show events from this agent')
-    .action(run(async (o: { limit?: string; agent?: string }, cmd: Command) => activityCommand({ ...globals(cmd), ...o })));
+    .action(run(async (o: { limit?: string; agent?: string }, cmd: Command) => (await import('./commands/activity.js')).activityCommand({ ...globals(cmd), ...o })));
 
   program
     .command('event')
@@ -220,7 +202,7 @@ export function buildProgram(): Command {
     .action(
       run(async (o: { agent?: string; hook?: string; verboseErrors?: boolean }, cmd: Command) => {
         const g = globals(cmd);
-        await eventCommand({ agent: o.agent, hook: o.hook, cwd: g.cwd, verbose: o.verboseErrors });
+        await (await import('./commands/event.js')).eventCommand({ agent: o.agent, hook: o.hook, cwd: g.cwd, verbose: o.verboseErrors });
       }),
     );
 
@@ -229,7 +211,7 @@ export function buildProgram(): Command {
     .description('Remove .athena/ and Athena agent integrations')
     .option('-y, --yes', 'Skip confirmation')
     .option('--keep-agents', 'Keep agent integration files/blocks')
-    .action(run(async (o: { yes?: boolean; keepAgents?: boolean }, cmd: Command) => cleanCommand({ ...globals(cmd), ...o })));
+    .action(run(async (o: { yes?: boolean; keepAgents?: boolean }, cmd: Command) => (await import('./commands/clean.js')).cleanCommand({ ...globals(cmd), ...o })));
 
   program
     .command('version')
@@ -256,7 +238,8 @@ export function buildProgram(): Command {
   return program;
 }
 
-async function main(): Promise<void> {
+/** Parse `process.argv` and run the command. Command modules are imported only when their command runs. */
+export async function main(): Promise<void> {
   const program = buildProgram();
   try {
     await program.parseAsync(process.argv);
@@ -281,5 +264,3 @@ async function main(): Promise<void> {
     process.exitCode = EXIT.ERROR;
   }
 }
-
-await main();

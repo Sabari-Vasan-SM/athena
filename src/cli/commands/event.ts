@@ -10,6 +10,37 @@ export interface EventOptions {
   verbose?: boolean;
 }
 
+/**
+ * Parse `athena event …` arguments (everything after "event") without loading
+ * commander, for the per-tool-call fast path. Accepts exactly what the `event`
+ * command and the global options accept; returns null for anything else (help,
+ * unknown options, extra arguments, a missing option value) so the caller can
+ * fall back to the full CLI, which reports it the usual way.
+ */
+export function parseEventArgs(args: string[]): EventOptions | null {
+  const opts: EventOptions = {};
+  const valued: Record<string, 'agent' | 'hook' | 'cwd'> = { '--agent': 'agent', '--hook': 'hook', '--cwd': 'cwd', '-C': 'cwd' };
+  const flags = new Set(['--athena-hook', '--verbose-errors', '--json', '--quiet', '-q', '--no-color']);
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    const eq = a.startsWith('--') ? a.indexOf('=') : -1;
+    const name = eq > 0 ? a.slice(0, eq) : a;
+    const key = valued[name];
+    if (key) {
+      const value = eq > 0 ? a.slice(eq + 1) : args[++i];
+      if (value === undefined) return null;
+      opts[key] = value;
+    } else if (a.startsWith('-C') && a.length > 2) {
+      opts.cwd = a.slice(2);
+    } else if (flags.has(a)) {
+      if (a === '--verbose-errors') opts.verbose = true;
+    } else {
+      return null;
+    }
+  }
+  return opts;
+}
+
 const STDIN_TIMEOUT_MS = 2000;
 const MAX_PAYLOAD_BYTES = 256 * 1024;
 
