@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { ATHENA_DIR } from '../core/config.js';
+import { ATHENA_DIR } from '../core/paths.js';
 
 /** Walk up from `start` to find the nearest directory containing `.athena/`. */
 export async function findProjectRoot(start: string): Promise<string | null> {

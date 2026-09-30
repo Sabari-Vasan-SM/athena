@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { athenaDir } from '../core/state/state.js';
+import { athenaDir } from '../core/paths.js';
 import { redact } from '../core/security/secrets.js';
 import { toPosix } from '../core/util/paths.js';
 import type { AgentEvent } from '../agents/common/hook-events.js';
