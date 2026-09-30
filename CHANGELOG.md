@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- Analysis is staged and incremental: a stat-only walk, one content pass in which every new or changed file is read exactly once (hashing and all per-file detector work share the same bytes), then an aggregate stage that builds the model from cached per-file facts. Unchanged files are not read at all. The generated `model.json` is unchanged (guarded by a golden test against the 0.2.1 analyzer).
+- 20,000-file benchmark (Apple M-series, vs 0.2.1): warm `sync --check` 2.9 s → 0.50 s (×5.8), `sync --check` after a one-file change 2.9 s → 0.49 s, cold `init` 3.5 s → 2.3 s; peak memory lower in every scenario (warm sync 195 → 162 MB). 200,000 files: warm `sync --check` 46 s → 4.1 s, cold `init` 51 s → 40 s, peak memory 730 → 589 MB (init).
+- File text is no longer cached without limit during analysis: a 64 MB byte-budgeted LRU serves the rare aggregate-stage lookup, and text is dropped as soon as a file's facts are computed.
+
+### Changed
+
+- New per-file facts cache in `.athena/cache/v1/` (gitignored; `cache/` is added to `.athena/.gitignore`, also for existing projects). Facts are keyed by content hash and discarded automatically when detector versions or the `ignore`/`include`/`maxFileBytes` settings change. Safe to delete; `athena clean` removes it with `.athena/`.
+- `state.json` schema 2: the file index moved to `.athena/cache/v1/files.json` (full SHA-256 hashes), so `state.json` stays small regardless of repository size. Version-1 files are migrated automatically on first read; older Athena versions will treat a v2 `state.json` as corrupted and rebuild it.
+- `athena init` creates the machine-local fingerprint salt (`.athena/local.json`) together with `.athena/`, so secret-finding fingerprints in the first `model.json` already use the project's stable key.
+
 ## 0.2.1 — 2026-09-30
 
 Security release. Upgrading is recommended for everyone. After upgrading, run `athena sync` once (the `security.md` format changed) and, if you use the pre-commit hook with `--review`, run `athena git-hook install --review` again so it reviews staged changes.
