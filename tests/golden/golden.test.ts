@@ -12,7 +12,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { analyzeProject } from '../../src/core/analyzer/analyze.js';
 import { buildFileIndex, writeFileIndex } from '../../src/core/state/state.js';
 import { analyzeProject as legacyAnalyze } from './legacy/analyzer/analyze.js';
-import { cleanupProjects, makeProject, REPO_ROOT } from '../helpers.js';
+import { backdateTree, cleanupProjects, makeProject, REPO_ROOT } from '../helpers.js';
 import { kitchenSink, manySecrets } from './fixtures.js';
 
 afterAll(cleanupProjects);
@@ -52,6 +52,7 @@ async function textFileCount(dir: string): Promise<number> {
 
 /** Legacy vs staged: cold, warm, then after an edit/add/delete. */
 async function assertGolden(dir: string, mutate?: (dir: string) => Promise<number>): Promise<void> {
+  await backdateTree(dir);
   await prepare(dir);
   const legacy = modelJson((await legacyAnalyze(dir)).model);
 

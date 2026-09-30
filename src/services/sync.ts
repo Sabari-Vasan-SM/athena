@@ -1,3 +1,4 @@
+import { projectSession } from './project-session.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
@@ -112,16 +113,6 @@ function detectRenames(prev: FileIndex, next: FileIndex, added: string[], delete
   return { added: remainingAdded, modified: [], deleted: deleted.filter((d) => !usedDeleted.has(d)), renamed };
 }
 
-async function readPreviousModel(dir: string): Promise<ProjectModel | null> {
-  const raw = await readTextIfExists(path.join(dir, 'model.json'));
-  if (!raw) return null;
-  try {
-    const parsed = ProjectModel.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
 
 async function readIgnored(dir: string): Promise<string | null> {
   const raw = await readTextIfExists(path.join(dir, IGNORE_FILE));
@@ -155,7 +146,7 @@ export async function planSync(root: string, opts: PlanOptions = {}): Promise<Sy
   if (st.kind === 'corrupted') warnings.push(`state.json is corrupted (${st.reason}); it will be rebuilt on apply.`);
 
   const prevIndex = prevState ? await readFileIndex(dir) : {};
-  const [prevModel, analysis] = await Promise.all([readPreviousModel(dir), analyzeProject(root, { signal: opts.signal, reuse: prevIndex })]);
+  const [prevModel, analysis] = await Promise.all([projectSession(root).model(), analyzeProject(root, { signal: opts.signal, reuse: prevIndex })]);
   opts.signal?.throwIfAborted();
 
   const previousBlocks = prevState ? Object.fromEntries(Object.entries(prevState.documents).map(([k, v]) => [k, v.blocks])) : undefined;

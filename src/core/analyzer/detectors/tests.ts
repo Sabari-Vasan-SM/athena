@@ -1,8 +1,9 @@
 import type { Detector, FactDef } from '../context.js';
 import { detected } from '../../model/fact.js';
+import { SOURCE_FILE, TEST_FILE } from '../../patterns.js';
 
-export const TEST_FILE_RE = /(^|\/)(__tests__|tests?|spec|specs|e2e|integration_tests|androidTest|test_driver)\/|\.(test|spec|e2e)\.[cm]?[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go|exs)$|_spec\.rb$|Tests?\.(java|kt|cs)$|_test\.dart$/;
-const SOURCE_RE = /\.(m|c)?(t|j)sx?$|\.(py|go|rs|java|kt|cs|php|rb|dart|ex|swift|vue|svelte)$/;
+export const TEST_FILE_RE = TEST_FILE;
+const SOURCE_RE = SOURCE_FILE;
 
 const RUNNER_CONFIGS: Array<[RegExp, string]> = [
   [/(^|\/)jest\.config\.(js|ts|cjs|mjs|json)$/, 'Jest'],

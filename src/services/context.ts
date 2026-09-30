@@ -15,7 +15,7 @@ export type { RelevantContext } from '../core/context/context-engine.js';
 export async function refreshGraph(root: string, opts: { signal?: AbortSignal } = {}): Promise<ProjectGraph> {
   const session = projectSession(root);
   const st = await session.state();
-  const analysis = await analyzeProject(root, { signal: opts.signal, reuse: st.kind === 'ok' ? st.state.fileIndex : undefined });
+  const analysis = await analyzeProject(root, { signal: opts.signal });
   const files = analysis.files.map((f) => f.path);
   const graph = await buildGraph(analysis.model, {
     files,

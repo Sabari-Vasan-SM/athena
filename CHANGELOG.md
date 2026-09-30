@@ -18,6 +18,7 @@
 
 ### Changed
 
+- Files modified within 2 seconds of the file index being written are re-read on the next run instead of trusted by size and mtime (Git's "racily clean" rule), so a same-size edit in the same clock tick is never missed.
 - The local server is split into route modules (`src/server/routes/*`) sharing one server context; routes, authentication, Host/Origin checks, security headers, CSP and rate limiting are unchanged.
 - `GET /api/sync` returns the proposal without `documents[].diff` (reasons, changed and preserved sections, additions/deletions and `diffTruncated` are still included). New `GET /api/sync/:doc[?planId=…]` returns one proposed document's diff; the id must be a knowledge document in the current proposal (404 otherwise, 409 when `planId` is stale). `POST /api/sync/check` still returns the full plan.
 - A corrupted `model.json` now gives a clear error with a hint (`model.json is corrupted (…)`, run `athena analyze`) instead of an internal error when starting a security scan from the web UI.

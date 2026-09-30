@@ -225,9 +225,20 @@ async function readIndexFile(file: string): Promise<FileIndex> {
 }
 
 /** Compact on-disk form: `{ "v": 1, "files": { "<path>": [hash, size, mtime, binary?] } }`. */
-export async function writeFileIndex(dir: string, index: FileIndex): Promise<void> {
+/**
+ * Entries modified this recently are "racily clean": a same-size edit within the same
+ * clock tick (or the filesystem's timestamp granularity) would leave size and mtime
+ * unchanged. Like Git, store an mtime that can never match for them, so the next walk
+ * re-reads the file instead of trusting the stat.
+ */
+export const RACY_WINDOW_MS = 2000;
+
+export async function writeFileIndex(dir: string, index: FileIndex, now = Date.now()): Promise<void> {
   const files: Record<string, [string, number, number] | [string, number, number, 1]> = {};
-  for (const [p, e] of Object.entries(index)) files[p] = e.b === 1 ? [e.h, e.s, e.m, 1] : [e.h, e.s, e.m];
+  for (const [p, e] of Object.entries(index)) {
+    const m = now - e.m < RACY_WINDOW_MS ? -1 : e.m;
+    files[p] = e.b === 1 ? [e.h, e.s, m, 1] : [e.h, e.s, m];
+  }
   const file = fileIndexPath(dir);
   await writeFileAtomic(file, JSON.stringify({ v: 1, files }));
   indexMemo.delete(file);

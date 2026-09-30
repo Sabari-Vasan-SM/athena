@@ -17,7 +17,32 @@ export async function makeProject(files: Record<string, string | Buffer>): Promi
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, content);
   }
+  await backdate(dir, Object.keys(files));
   return dir;
+}
+
+/**
+ * Give files an mtime an hour in the past, as existing code usually has. Athena re-reads
+ * files modified within the last couple of seconds ("racily clean", see RACY_WINDOW_MS),
+ * so tests that assert zero reads after an analysis need files that aren't brand new.
+ */
+export async function backdate(dir: string, rels: string[]): Promise<void> {
+  const past = new Date(Date.now() - 3_600_000);
+  await Promise.all(rels.map((rel) => fs.utimes(path.join(dir, rel), past, past)));
+}
+
+/** Backdate every file under `dir` (for projects copied or generated rather than made with makeProject). */
+export async function backdateTree(dir: string): Promise<void> {
+  const rels: string[] = [];
+  const walk = async (rel: string): Promise<void> => {
+    for (const ent of await fs.readdir(path.join(dir, rel), { withFileTypes: true })) {
+      const child = rel ? `${rel}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) await walk(child);
+      else if (ent.isFile()) rels.push(child);
+    }
+  };
+  await walk('');
+  await backdate(dir, rels);
 }
 
 export async function cleanupProjects(): Promise<void> {
