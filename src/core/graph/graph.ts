@@ -55,11 +55,17 @@ export interface BuildOptions {
   signal?: AbortSignal;
 }
 
+const RESOLVE_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.py', '.vue', '.svelte'];
+
 function resolveImport(fromFile: string, spec: string, fileSet: Set<string>): string | null {
   if (!spec.startsWith('.')) return null; // package import, not a project file
   const base = toPosix(path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), spec)));
-  const candidates = [base, ...['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.py', '.vue', '.svelte'].flatMap((ext) => [`${base}${ext}`, `${base}/index${ext}`, `${base}/__init__${ext}`])];
-  return candidates.find((c) => fileSet.has(c)) ?? null;
+  if (fileSet.has(base)) return base;
+  // Same candidate order as before, but stop at the first hit instead of building all 31.
+  for (const ext of RESOLVE_EXTS) {
+    for (const c of [`${base}${ext}`, `${base}/index${ext}`, `${base}/__init__${ext}`]) if (fileSet.has(c)) return c;
+  }
+  return null;
 }
 
 /** Same ordering as `a.localeCompare(b)` (both use the default-locale collator), without per-call setup. */
