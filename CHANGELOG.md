@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- `ai.baseUrl` and `ai.consent` in the committed `.athena/config.json` are now ignored (with a warning in `athena ai status`, `athena ai enrich` and `athena doctor`). Move them to the environment (`ATHENA_AI_BASE_URL`, `ATHENA_AI_CONSENT=1`), `.athena/local.json` (gitignored), or your user config (`~/.config/athena/config.json`, `$XDG_CONFIG_HOME/athena/config.json`, or `%APPDATA%\athena\config.json` on Windows). `provider`, `model`, `mode` and `maxChars` still work from `.athena/config.json`.
+
+### Security
+
+- **AI credential exfiltration**: a repository could set its own `ai.baseUrl` and `ai.consent` in `.athena/config.json` and receive your API key and knowledge. Both are now read only from machine-local sources (env > `.athena/local.json` > user config), providers refuse a base URL without a trusted source, and an Ollama endpoint that isn't loopback counts as remote and needs consent.
+- **Local server**: per-client rate limiting on `/api/*` (token bucket, 30 req/s, burst 120, 429 when exceeded); `--allow-remote` keeps the Host/Origin allowlist (bind address plus loopback) instead of disabling it, and warns that the connection is plain HTTP; `/api/context` clamps `maxChars` to 200,000; a failed security-scan start (e.g. missing `model.json`) no longer leaves every later scan stuck at 423; shutdown no longer hangs on open event streams.
+- **MCP**: every tool that returns repository content redacts secret-looking values and wraps the text in `<athena-document path="…" trust="untrusted-data">` delimiters with a note that it is project data, not instructions (embedded delimiters are neutralized).
+- **Agent hooks**: generated hook scripts quote `ATHENA_HOOK_COMMAND`, the agent name and the hook argument (POSIX single quotes; cmd.exe double quotes with `%` doubled), so paths with spaces, quotes, `$` or `&` can't break or inject into the script.
+- **Agent activity log**: commands and messages are additionally masked for `Authorization: Bearer|Basic …`, `--password …`, `mysql -p…` and `scheme://user:password@` credentials; rotation renames the log to `.agent-events.1.jsonl` (one generation kept) instead of rewriting it, so concurrent appends are never lost, and recent-event reads include the previous generation.
+- **GitHub Action**: the PR comment is only updated when it was written by `github-actions[bot]` and carries the versioned `<!-- athena-review:v1 -->` marker (the old marker is still recognized from the same bot), so another user's comment can't be hijacked. Review findings now also produce `::error`/`::warning` file annotations (with line numbers where available, escaped, never secret values).
+- **Web UI**: the Security and graph views refresh after `security.*` and `graph.*` events.
+
 ## 0.2.0 — 2026-09-26
 
 - **Website link**: the terminal header, footer and next steps now link to https://athena.sabari.me, which is also the package homepage.

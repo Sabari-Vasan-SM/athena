@@ -15,8 +15,14 @@ export const AiConfig = z.object({
   consent: z.boolean().default(false),
   /** Upper bound on characters of knowledge sent in one request. */
   maxChars: z.number().int().min(500).max(200_000).default(24_000),
-  /** Ollama base URL, or a custom compatible endpoint. */
+  /**
+   * Ollama base URL, or a custom compatible endpoint. Only ever set from a trusted,
+   * machine-local source (see resolveAiConfig in src/services/ai.ts) — never from the
+   * committed .athena/config.json, which anyone with push access controls.
+   */
   baseUrl: z.string().optional(),
+  /** Where baseUrl came from. Providers refuse a baseUrl without a trusted source. */
+  baseUrlSource: z.enum(['env', 'local', 'user']).optional(),
 });
 export type AiConfig = z.infer<typeof AiConfig>;
 
@@ -63,6 +69,27 @@ export class AiError extends Error {
     super(message);
     this.name = 'AiError';
   }
+}
+
+export function isLoopbackUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    return host === 'localhost' || host === '::1' || host === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The endpoint a provider talks to: its default, or a baseUrl that came from a trusted
+ * machine-local source. API keys are only ever sent to the result of this function.
+ */
+export function providerBase(config: AiConfig, fallback: string): string {
+  if (!config.baseUrl) return fallback;
+  if (!config.baseUrlSource) {
+    throw new AiError('Refusing to use an AI base URL that did not come from a trusted source.', 'Set ATHENA_AI_BASE_URL, or "ai.baseUrl" in .athena/local.json or your user config.');
+  }
+  return config.baseUrl.replace(/\/+$/, '');
 }
 
 export async function postJson(url: string, body: unknown, headers: Record<string, string>, req: CompletionRequest): Promise<Record<string, unknown>> {

@@ -50,3 +50,12 @@ describe('DiffView', () => {
     expect(container.textContent).toContain('<script>alert(1)</script>');
   });
 });
+
+import { bumpsRevision } from '../../web/src/lib/store';
+
+describe('live store refresh', () => {
+  it('refreshes pages after security scans and graph builds', () => {
+    for (const t of ['security.completed', 'security.failed', 'graph.built', 'knowledge.saved', 'analysis.completed', 'rules.changed', 'sync.applied', 'git.head']) expect(bumpsRevision(t), t).toBe(true);
+    for (const t of ['analysis.started', 'agent.tool', 'securityish']) expect(bumpsRevision(t), t).toBe(false);
+  });
+});

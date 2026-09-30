@@ -118,8 +118,11 @@ runs:
           node "$GITHUB_ACTION_PATH/action/report.mjs" markdown "$RUNNER_TEMP/athena-review.json" > "$body"
         fi
         cat "$body" >> "$GITHUB_STEP_SUMMARY"
-        id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-          --jq '[.[] | select(.user.type == "Bot" and (.body | contains("<!-- athena-review -->")))][0].id // empty' 2>/dev/null | head -n 1) || id=""
+        # Only Athena's own comment (github-actions[bot] + marker) is ever edited.
+        comments="$RUNNER_TEMP/athena-comments.jsonl"
+        gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+          --jq '.[] | {id, login: .user.login, body}' > "$comments" 2>/dev/null || : > "$comments"
+        id=$(node "$GITHUB_ACTION_PATH/action/report.mjs" find-comment "$comments") || id=""
         if [ -n "$id" ] && gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F "body=@$body" >/dev/null; then
           echo "Updated the Athena review comment."
         elif gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F "body=@$body" >/dev/null; then

@@ -6,6 +6,7 @@ import { parseBlocks } from '../core/knowledge/managed-blocks.js';
 import { listRules, parseRules } from '../core/knowledge/rules.js';
 import { athenaDir, readState } from '../core/state/state.js';
 import { loadConfig } from '../core/config.js';
+import { committedAiWarning } from './ai.js';
 import { readTextIfExists } from '../core/util/fs.js';
 import { findProjectRoot } from './project.js';
 import { relativeTime } from './time.js';
@@ -56,6 +57,8 @@ export async function runDoctor(cwd: string): Promise<{ checks: Check[]; root: s
 
   const cfg = await loadConfig(root);
   if (cfg.warning) add({ area: 'Configuration', level: 'warn', message: cfg.warning });
+  const aiWarning = await committedAiWarning(root);
+  if (aiWarning) add({ area: 'Configuration', level: 'warn', message: aiWarning.split(': ')[0]!, hint: aiWarning.slice(aiWarning.indexOf(': ') + 2) });
 
   const st = await readState(dir);
   if (st.kind === 'ok') add({ area: 'State', level: 'ok', message: `state.json valid (analyzed ${relativeTime(st.state.analyzedAt)})` });

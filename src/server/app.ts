@@ -19,11 +19,11 @@ import { getRelevantContext, graphSummary, refreshGraph } from '../services/cont
 import { aiStatus } from '../services/ai.js';
 import { ProjectModel } from '../core/model/project-model.js';
 import { watchProject, type ProjectWatcher } from '../services/watch.js';
-import { ACTIVITY_FILE, activityFile, parseEventLines, readRecentEvents, summarizeSessions } from '../services/agent-activity.js';
+import { ACTIVITY_FILE, activityFile, parseEventLines, readRecentEvents, rotatedActivityFile, summarizeSessions } from '../services/agent-activity.js';
 import type { AgentEvent } from '../agents/common/hook-events.js';
 import { ATHENA_VERSION } from '../services/version.js';
 import { EventBus } from './events.js';
-import { allowedHostsFor, allowedOriginsFor, makeGuard, SECURITY_HEADERS } from './security.js';
+import { allowedHostsFor, allowedOriginsFor, DEFAULT_RATE_LIMIT, makeGuard, makeRateLimiter, SECURITY_HEADERS, type RateLimitOptions } from './security.js';
 import { buildAssetMap, MISSING_UI_HTML } from './static.js';
 
 export interface ServerOptions {
@@ -32,8 +32,10 @@ export interface ServerOptions {
   host: string;
   port: number;
   webDir: string;
-  /** Explicit opt-in to non-loopback binding; disables the Host allowlist. */
+  /** Explicit opt-in to non-loopback binding. The Host allowlist still applies (bind host + loopback). */
   allowRemote?: boolean;
+  /** Per-client rate limit for /api/* (token bucket). */
+  rateLimit?: RateLimitOptions;
   logger?: boolean;
   /** Watch the project and propose knowledge updates as files change. */
   watch?: boolean;
@@ -47,6 +49,9 @@ export interface AthenaServer {
   instanceId: string;
   close(): Promise<void>;
 }
+
+/** Upper bound for /api/context budgets, whatever the client asks for. */
+export const MAX_CONTEXT_CHARS = 200_000;
 
 const STATUS: Record<ErrorKind, number> = {
   invalid: 400,
@@ -67,6 +72,8 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     logger: opts.logger ?? false,
     bodyLimit: 2 * 1024 * 1024,
     trustProxy: false,
+    // Hijacked SSE responses would otherwise keep close() waiting forever.
+    forceCloseConnections: true,
     // Strict validation: no type coercion, reject (don't silently strip) unknown fields.
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: false } },
   });
@@ -78,14 +85,23 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
   let watcher: ProjectWatcher | null = null;
   let syncBusy = false;
   let activityOffset = 0;
+  let activityIno: number | null = null;
   /** Agent activity is only shown while it is fresh; after this it reverts to idle. */
   const AGENT_IDLE_MS = 5 * 60 * 1000;
   let statusCache: { at: number; report: StatusReport } | null = null;
 
+  const takeToken = makeRateLimiter(opts.rateLimit ?? DEFAULT_RATE_LIMIT);
+  app.addHook('onRequest', async (req, reply) => {
+    if (!req.url.startsWith('/api/')) return;
+    if (!takeToken(req.ip || 'unknown')) {
+      reply.header('Retry-After', '1');
+      await reply.code(429).send({ error: 'Too many requests' });
+    }
+  });
   app.addHook('onRequest', makeGuard({
     token: opts.token,
-    allowedHosts: opts.allowRemote ? new Set() : allowedHostsFor(opts.host, opts.port),
-    allowedOrigins: opts.allowRemote ? new Set() : allowedOriginsFor(opts.host, opts.port),
+    allowedHosts: allowedHostsFor(opts.host, opts.port, { remote: opts.allowRemote }),
+    allowedOrigins: allowedOriginsFor(opts.host, opts.port, { remote: opts.allowRemote }),
   }));
   app.addHook('onSend', async (req, reply, payload) => {
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) reply.header(k, v);
@@ -279,26 +295,37 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     events.setActivity({ state: e.state, actor: 'agent', task: `${e.agent}: ${e.message}`, reading: e.files.slice(0, 4) }, e.state === 'SUCCESS' ? 10_000 : AGENT_IDLE_MS);
   };
 
+  /** Apply complete lines from `file` starting at `offset`; returns the new offset. */
+  const readLinesFrom = async (file: string, offset: number, size: number): Promise<number> => {
+    if (size <= offset) return offset;
+    const handle = await fs.open(file, 'r');
+    try {
+      const length = size - offset;
+      const buf = Buffer.alloc(length);
+      await handle.read(buf, 0, length, offset);
+      const text = buf.toString('utf8');
+      const lastNewline = text.lastIndexOf('\n');
+      if (lastNewline === -1) return offset; // partial line; wait for the rest
+      for (const e of parseEventLines(text.slice(0, lastNewline + 1))) applyAgentEvent(e, true);
+      return offset + Buffer.byteLength(text.slice(0, lastNewline + 1));
+    } finally {
+      await handle.close();
+    }
+  };
+
   const readNewAgentEvents = async () => {
     try {
       const file = activityFile(root);
       const st = await fs.stat(file).catch(() => null);
       if (!st) return;
-      if (st.size < activityOffset) activityOffset = 0; // file rotated
-      if (st.size === activityOffset) return;
-      const handle = await fs.open(file, 'r');
-      try {
-        const length = st.size - activityOffset;
-        const buf = Buffer.alloc(length);
-        await handle.read(buf, 0, length, activityOffset);
-        const text = buf.toString('utf8');
-        const lastNewline = text.lastIndexOf('\n');
-        if (lastNewline === -1) return; // partial line; wait for the rest
-        activityOffset += Buffer.byteLength(text.slice(0, lastNewline + 1));
-        for (const e of parseEventLines(text.slice(0, lastNewline + 1))) applyAgentEvent(e, true);
-      } finally {
-        await handle.close();
-      }
+      if (activityIno !== null && st.ino !== activityIno) {
+        // Rotated (renamed to the .1 file): finish what was appended there before the rename.
+        const old = await fs.stat(rotatedActivityFile(root)).catch(() => null);
+        if (old && old.ino === activityIno) await readLinesFrom(rotatedActivityFile(root), activityOffset, old.size).catch(() => {});
+        activityOffset = 0;
+      } else if (st.size < activityOffset) activityOffset = 0; // truncated
+      activityIno = st.ino;
+      activityOffset = await readLinesFrom(file, activityOffset, st.size);
     } catch {
       /* activity log unreadable: ignore */
     }
@@ -381,30 +408,37 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     async (req, reply) => {
       if (scanRunning) throw new AthenaError('A security scan is already running.', undefined, 1, 'busy');
       scanRunning = true;
-      const model = await projectModel();
-      events.emit({ source: 'web-ui', type: 'security.started', level: 'info', message: 'Security scan started' });
-      events.setActivity({ state: 'REVIEWING', actor: 'athena', task: 'Scanning dependencies', reading: [] });
-      void runSecurityScan(root, model, { skipAudit: req.body?.skipAudit, onTool: (tool) => events.setActivity({ state: 'REVIEWING', actor: 'athena', task: `Running ${tool}`, reading: [] }) })
-        .then(async (scan: SecurityScan) => {
-          await saveScan(root, scan);
-          const findings = scan.tools.reduce((n, t) => n + t.findings.length, 0);
-          events.emit({
-            source: 'athena',
-            type: 'security.completed',
-            level: findings || scan.secrets.count ? 'warn' : 'success',
-            message: `Security scan finished — ${findings} dependency finding(s), ${scan.secrets.count} potential secret(s)`,
-            data: { findings, secrets: scan.secrets.count },
+      // Until the background scan owns the flag, any throw (e.g. model.json missing) must release it.
+      let handedOff = false;
+      try {
+        const model = await projectModel();
+        events.emit({ source: 'web-ui', type: 'security.started', level: 'info', message: 'Security scan started' });
+        events.setActivity({ state: 'REVIEWING', actor: 'athena', task: 'Scanning dependencies', reading: [] });
+        handedOff = true;
+        void runSecurityScan(root, model, { skipAudit: req.body?.skipAudit, onTool: (tool) => events.setActivity({ state: 'REVIEWING', actor: 'athena', task: `Running ${tool}`, reading: [] }) })
+          .then(async (scan: SecurityScan) => {
+            await saveScan(root, scan);
+            const findings = scan.tools.reduce((n, t) => n + t.findings.length, 0);
+            events.emit({
+              source: 'athena',
+              type: 'security.completed',
+              level: findings || scan.secrets.count ? 'warn' : 'success',
+              message: `Security scan finished — ${findings} dependency finding(s), ${scan.secrets.count} potential secret(s)`,
+              data: { findings, secrets: scan.secrets.count },
+            });
+            events.setActivity({ state: 'SUCCESS', actor: 'athena', task: 'Security scan complete', reading: [] }, 4000);
+            replanSoon();
+          })
+          .catch((err: Error) => {
+            events.emit({ source: 'athena', type: 'security.failed', level: 'error', message: `Security scan failed: ${err.message}` });
+            events.setActivity({ state: 'ERROR', actor: 'athena', task: 'Security scan failed', reading: [] }, 8000);
+          })
+          .finally(() => {
+            scanRunning = false;
           });
-          events.setActivity({ state: 'SUCCESS', actor: 'athena', task: 'Security scan complete', reading: [] }, 4000);
-          replanSoon();
-        })
-        .catch((err: Error) => {
-          events.emit({ source: 'athena', type: 'security.failed', level: 'error', message: `Security scan failed: ${err.message}` });
-          events.setActivity({ state: 'ERROR', actor: 'athena', task: 'Security scan failed', reading: [] }, 8000);
-        })
-        .finally(() => {
-          scanRunning = false;
-        });
+      } finally {
+        if (!handedOff) scanRunning = false;
+      }
       return reply.code(202).send({ accepted: true });
     },
   );
@@ -419,8 +453,7 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
 
   app.get<{ Querystring: { task?: string; maxChars?: string } }>('/api/context', async (req) => {
     const task = String(req.query.task ?? '').slice(0, 500);
-    const maxChars = req.query.maxChars ? Number(req.query.maxChars) : undefined;
-    return getRelevantContext(root, task, { maxChars: Number.isFinite(maxChars) ? maxChars : undefined });
+    return getRelevantContext(root, task, { maxChars: clampContextChars(req.query.maxChars) });
   });
 
   app.get('/api/graph', async () => ({ ...(await graphSummary(root)), building: graphBuilding }));
@@ -457,9 +490,19 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     };
   });
 
+  const sseClients = new Set<import('node:http').ServerResponse>();
+  app.addHook('preClose', async () => {
+    for (const res of sseClients) {
+      res.end();
+      res.socket?.destroy();
+    }
+    sseClients.clear();
+  });
+
   app.get('/api/events', (req, reply) => {
     reply.hijack();
     const res = reply.raw;
+    sseClients.add(res);
     res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     send('activity', events.activity());
@@ -472,6 +515,7 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     req.raw.on('close', () => {
       clearInterval(heartbeat);
       unsubscribe();
+      sseClients.delete(res);
     });
   });
 
@@ -534,7 +578,9 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
   {
     const history = await readRecentEvents(root, 200);
     for (const e of history) applyAgentEvent(e, false);
-    activityOffset = await fs.stat(activityFile(root)).then((st) => st.size).catch(() => 0);
+    const st = await fs.stat(activityFile(root)).catch(() => null);
+    activityOffset = st?.size ?? 0;
+    activityIno = st?.ino ?? null;
   }
 
   if (opts.watch) {
@@ -594,6 +640,12 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
       await app.close();
     },
   };
+}
+
+/** Server-side clamp for /api/context budgets: the budget decides how much work and memory a request costs. */
+export function clampContextChars(raw: string | undefined): number | undefined {
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) ? Math.min(MAX_CONTEXT_CHARS, Math.max(500, Math.floor(n))) : undefined;
 }
 
 function parseIndex(raw: string): number {
