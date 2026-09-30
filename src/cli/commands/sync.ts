@@ -1,5 +1,5 @@
 import { applySync, fileChangeCount, needsIndexRefreshOnly, planSync, staleForCheck, summarizePlan, type SyncPlan } from '../../services/sync.js';
-import { EXIT } from '../../services/errors.js';
+import { AthenaError, EXIT } from '../../services/errors.js';
 import { requireProjectRoot, type GlobalOptions } from '../context.js';
 import { confirm } from './clean.js';
 import * as ui from '../ui/term.js';
@@ -8,6 +8,8 @@ export interface SyncOptions extends GlobalOptions {
   yes?: boolean;
   dryRun?: boolean;
   check?: boolean;
+  /** With `check`: compare the staged knowledge with the staged code. */
+  staged?: boolean;
   diff?: boolean;
   force?: boolean;
   signal?: AbortSignal;
@@ -74,7 +76,11 @@ export function printPlan(plan: SyncPlan, opts: { diff?: boolean } = {}): void {
 }
 
 export async function syncCommand(opts: SyncOptions): Promise<number> {
+  if (opts.staged && (!opts.check || opts.yes || opts.dryRun || opts.diff || opts.force)) {
+    throw new AthenaError('`--staged` only works with `--check`.', 'Run `athena sync --check --staged`; to update knowledge, run `athena sync` and stage .athena/.');
+  }
   const root = await requireProjectRoot(opts);
+  if (opts.staged) return stagedCheckCommand(root, opts);
   const sp = ui.spinner('Checking for changes...');
   let plan: SyncPlan;
   try {
@@ -146,4 +152,33 @@ export async function syncCommand(opts: SyncOptions): Promise<number> {
     for (const p of result.preserved) ui.warn(`${p.file}: kept your edits in ${p.sections.join(', ')} ${ui.dim('(use `athena analyze --force` to regenerate)')}`);
   }
   return EXIT.OK;
+}
+
+async function stagedCheckCommand(root: string, opts: SyncOptions): Promise<number> {
+  const { checkStaged } = await import('../../services/staged-check.js');
+  const sp = ui.spinner('Checking staged knowledge...');
+  let r: Awaited<ReturnType<typeof checkStaged>>;
+  try {
+    r = await checkStaged(root, { signal: opts.signal });
+  } finally {
+    sp.stop();
+  }
+  if (ui.isJson()) {
+    ui.json({ staged: true, inSync: r.inSync, stale: r.stale.map((d) => d.file), documents: r.stale, files: r.files, fromIndex: r.fromIndex, durationMs: r.durationMs });
+    return r.inSync ? EXIT.OK : 1;
+  }
+  if (r.inSync) {
+    if (!ui.isQuiet()) ui.ok(`Staged knowledge matches the staged code ${ui.dim(`(${r.files} files in the index)`)}`);
+    return EXIT.OK;
+  }
+  if (!ui.isQuiet()) ui.heading('Staged knowledge to update');
+  const width = Math.max(...r.stale.map((d) => d.file.length));
+  for (const d of r.stale) {
+    const what = d.status === 'missing' ? 'not staged' : d.changedSections.join(', ');
+    ui.line(`  ${ui.c.yellow('~')} ${d.file.padEnd(width)}  ${ui.dim(what)}${d.syncedButUnstaged ? ui.dim(' (up to date in the working tree: stage it)') : ''}`);
+  }
+  const files = r.stale.map((d) => `.athena/${d.file}`).join(' ');
+  if (r.stale.every((d) => d.syncedButUnstaged)) ui.line(ui.c.yellow(`Staged knowledge is out of date; the working tree is already synced. Run \`git add ${files}\`.`));
+  else ui.line(ui.c.yellow('Staged knowledge is out of date for the staged code. Run `athena sync`, then stage .athena/.'));
+  return 1;
 }

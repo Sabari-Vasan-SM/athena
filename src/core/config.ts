@@ -1,8 +1,9 @@
 import path from 'node:path';
 import { z } from 'zod';
 import { readTextIfExists } from './util/fs.js';
+import { ATHENA_DIR } from './paths.js';
 
-export const ATHENA_DIR = '.athena';
+export { ATHENA_DIR };
 
 export const DEFAULT_IGNORES = [
   '.git',

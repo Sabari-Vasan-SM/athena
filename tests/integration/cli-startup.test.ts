@@ -54,12 +54,13 @@ describe('built CLI startup', () => {
     expect([...packages]).toEqual([]); // no dependency is loaded before argv is inspected
   });
 
+  // zod alone costs ~15 ms and ~8 MB per hook call: the event path uses src/core/paths.ts, not the config/state schemas.
   it('loads no heavy dependency on the `athena event` path', async () => {
     const entry = await fs.readFile(CLI, 'utf8');
     const eventChunk = entry.match(/import\(["']\.\/(event-[\w-]+\.js)["']\)/)?.[1];
     expect(eventChunk).toBeTruthy();
     const { packages } = await staticGraph(eventChunk!);
-    for (const heavy of ['commander', 'fastify', '@babel/parser', '@modelcontextprotocol/sdk', 'chokidar', 'yaml', 'smol-toml', 'diff', 'ignore', 'picocolors']) {
+    for (const heavy of ['commander', 'fastify', '@babel/parser', '@modelcontextprotocol/sdk', 'chokidar', 'yaml', 'smol-toml', 'diff', 'ignore', 'picocolors', 'zod']) {
       expect([...packages].some((p) => p === heavy || p.startsWith(`${heavy}/`)), heavy).toBe(false);
     }
   });

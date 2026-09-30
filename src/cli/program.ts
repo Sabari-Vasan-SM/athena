@@ -78,9 +78,10 @@ export function buildProgram(): Command {
     .option('-y, --yes', 'Apply without asking')
     .option('--dry-run', 'Show the plan without writing')
     .option('--check', 'Exit with code 1 if knowledge is out of date (for CI/hooks)')
+    .option('--staged', 'With --check: check the staged knowledge against the staged code (the index), ignoring untracked and unstaged changes')
     .option('--diff', 'Print full diffs of proposed document changes')
     .option('--force', 'Also regenerate sections that were edited by hand')
-    .action(run(async (o: { yes?: boolean; dryRun?: boolean; check?: boolean; diff?: boolean; force?: boolean }, cmd: Command) => (await import('./commands/sync.js')).syncCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+    .action(run(async (o: { yes?: boolean; dryRun?: boolean; check?: boolean; staged?: boolean; diff?: boolean; force?: boolean }, cmd: Command) => (await import('./commands/sync.js')).syncCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   program
     .command('watch')

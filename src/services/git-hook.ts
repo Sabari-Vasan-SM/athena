@@ -15,8 +15,12 @@ import { AthenaError, conflict } from './errors.js';
 export const HOOK_START = '# athena:start';
 export const HOOK_END = '# athena:end';
 
-/** The line to put in husky / lefthook / pre-commit configs instead of installing a hook file. */
-export const HOOK_MANAGER_COMMAND = 'npx --no-install athena sync --check';
+/**
+ * The line to put in husky / lefthook / pre-commit configs instead of installing a hook file.
+ * `--staged` checks the knowledge being committed against the code being committed, so
+ * untracked and unstaged files never block a commit.
+ */
+export const HOOK_MANAGER_COMMAND = 'npx --no-install athena sync --check --staged';
 
 const SHELL_SHEBANG = /^#!\s*(?:\/usr\/bin\/env\s+)?(?:\/usr\/local\/bin\/|\/usr\/bin\/|\/bin\/)?(?:sh|bash|dash|zsh|ksh)(?:\s|$)/;
 const HOOK_MANAGERS: Array<{ name: string; pattern: RegExp }> = [
@@ -40,6 +44,11 @@ export interface GitHookLocation {
 export interface GitHookStatus extends GitHookLocation {
   installed: boolean;
   review: boolean;
+  /**
+   * False for a block written by an earlier version, whose knowledge check reads the working tree
+   * (so untracked or unstaged files can block a commit). `athena git-hook install` updates it.
+   */
+  staged: boolean;
   /** True when the whole file is Athena's (created by `athena git-hook install`). */
   ownsFile: boolean;
   /** A hook manager that appears to own the hooks directory or file, if any. */
@@ -73,12 +82,12 @@ export function renderHookBlock(opts: { projectPrefix: string; review: boolean; 
     `${HOOK_START} (added by \`athena git-hook install\`; remove with \`athena git-hook uninstall\`)`,
     `if command -v ${probe} >/dev/null 2>&1; then`,
     '  athena_rc=0',
-    `  athena_out=$(${athena} sync --check --quiet 2>&1) || athena_rc=$?`,
+    `  athena_out=$(${athena} sync --check --staged --quiet 2>&1) || athena_rc=$?`,
     '  if [ "$athena_rc" -eq 3 ]; then',
-    "    echo 'athena: Athena is not initialized in this project; skipping the knowledge check.' >&2",
+    "    echo 'athena: no Athena knowledge to check (not initialized, or .athena/ is not committed); skipping the knowledge check.' >&2",
     '  elif [ "$athena_rc" -ne 0 ]; then',
     `    printf '%s\\n' "$athena_out" >&2`,
-    "    echo 'athena: commit blocked: .athena/ knowledge is out of date. Run `athena sync`, stage .athena/ and commit again (or skip once with `git commit --no-verify`).' >&2",
+    "    echo 'athena: commit blocked: staged .athena/ knowledge is out of date. Run `athena sync`, stage .athena/ and commit again (or skip once with `git commit --no-verify`).' >&2",
     '    exit 1',
     '  fi',
   ];
@@ -135,6 +144,7 @@ export async function hookStatus(projectRoot: string): Promise<GitHookStatus> {
     ...loc,
     installed: Boolean(parsed),
     review: Boolean(parsed?.block.includes(' review ')),
+    staged: Boolean(parsed?.block.includes(' sync --check --staged')),
     ownsFile: Boolean(parsed && `${parsed.before}${parsed.after}`.trim() === NEW_FILE_HEADER.trim()),
     manager: detectManager(loc, text && parsed ? `${parsed.before}${parsed.after}` : text),
   };
