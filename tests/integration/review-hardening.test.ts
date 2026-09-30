@@ -193,15 +193,16 @@ describe('review --staged', () => {
 
     await fs.writeFile(path.join(dir, '.env'), `GITHUB_TOKEN=${FAKE.github}\n`);
     await fs.writeFile(path.join(dir, 'notes.md'), '# notes\n');
-    // The hook's knowledge check sees the working tree; bring .athena/ up to date so only the review decides.
+    // The hook's knowledge check sees what is staged; stage up-to-date knowledge so only the review decides.
     expect((await runCli(['sync', '--yes'], dir)).code).toBe(0);
-    await git(dir, ['add', 'notes.md']);
+    await git(dir, ['add', 'notes.md', '.athena']);
     const ok = await git(dir, ['commit', '-q', '--no-gpg-sign', '-m', 'notes'], env);
     expect(ok.code, ok.stderr).toBe(0);
 
     await fs.writeFile(path.join(dir, 'notes.md'), `# notes\ntoken ${FAKE.github}\n`);
-    expect((await runCli(['sync', '--yes'], dir)).code).toBe(0);
     await git(dir, ['add', 'notes.md']);
+    expect((await runCli(['sync', '--yes'], dir)).code).toBe(0);
+    await git(dir, ['add', '.athena']);
     const blocked = await git(dir, ['commit', '-q', '--no-gpg-sign', '-m', 'leak'], env);
     expect(blocked.code).toBe(1);
     expect(blocked.stderr).toContain('found blockers');

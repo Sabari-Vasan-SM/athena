@@ -26,9 +26,9 @@ import { HISTORY_SECTIONS } from './sync.js';
  * facts come from the last analysis and the facts cache, so only staged changes
  * are read) and analyzed there. The tree and its manifest are kept between runs
  * and updated incrementally. Untracked files and unstaged edits are invisible to
- * the check, as they are to the commit. The knowledge notes which local env files
- * (such as a gitignored `.env`) exist; for untracked ones, staged knowledge may list
- * them or not. Git-history sections (hotspots) are ignored, as with `sync --check`.
+ * the check, as they are to the commit — except local env files (a `.env` that isn't
+ * committed): staged knowledge written with or without them is accepted.
+ * Git-history sections (hotspots) are ignored, as with `sync --check`.
  */
 
 export interface StagedDocument {
@@ -106,6 +106,7 @@ async function addLocalInputs(root: string, snapRoot: string, snap: IndexSnapsho
   const dir = athenaDir(root);
   const snapAthena = athenaDir(snapRoot);
   await fs.rm(path.join(snapRoot, '.git'), { recursive: true, force: true });
+  await Promise.all(REAL_ENV_NAMES.filter((n) => !snap.manifest[n]).map((n) => fs.rm(path.join(snapRoot, n), { force: true, recursive: true })));
   // Facts: the project's shard files, linked; links from the previous run that still point at them are kept.
   const facts = path.join(cacheRoot(dir), 'facts');
   const snapFacts = path.join(cacheRoot(snapAthena), 'facts');
@@ -207,14 +208,12 @@ export async function checkStaged(rootInput: string, opts: { signal?: AbortSigna
     const prevIndex = await readFileIndex(dir);
     const reuse: typeof prevIndex = {};
     for (const p of snap.placeholders) if (prevIndex[p]) reuse[p] = prevIndex[p]!;
-    const analysis = await analyzeProject(snapRoot, {
-      signal,
-      reuse,
-      fingerprintSalt: (await readLocalConfig(root)).salt,
-      readFile: snapshotReader(await fs.realpath(snapRoot), root, snap.placeholders),
-    });
-    analysis.model.root = root;
-    analysis.model.git = redactDeep(await history);
+    const salt = (await readLocalConfig(root)).salt;
+    const reader = snapshotReader(await fs.realpath(snapRoot), root, snap.placeholders);
+    const analyze = async (): Promise<ProjectModel> => {
+      const analysis = await analyzeProject(snapRoot, { signal, reuse, fingerprintSalt: salt, readFile: reader });
+      return { ...analysis.model, root, git: redactDeep(await history) };
+    };
 
     const prevState = st.kind === 'ok' ? st.state : null;
     const previousBlocks = prevState ? Object.fromEntries(Object.entries(prevState.documents).map(([k, v]) => [k, v.blocks])) : undefined;
@@ -228,19 +227,32 @@ export async function checkStaged(rootInput: string, opts: { signal?: AbortSigna
       }
       return out;
     };
-    let stale = await staleDocs(analysis.model);
-    // Knowledge lists the local env files that exist (never their contents). Untracked ones
-    // are machine-local: accept staged knowledge that lists any of them. When none fits,
-    // report against all of them, which is what `athena sync` here would write.
+    const model = await analyze();
+    let stale = await staleDocs(model);
+
+    // Local env files (a `.env` that isn't committed) are machine-local. The knowledge
+    // notes which exist, and `athena sync` analyzes them like any file unless they are
+    // gitignored. Accept staged knowledge written with or without them: first any subset
+    // listed as present, then (rarely needed, one more mostly cached analysis) with their
+    // content, which is what `athena sync` here writes and what is reported otherwise.
     const localEnv = await untrackedEnvFiles(root, snap);
-    const withEnv = (names: string[]): ProjectModel => ({ ...analysis.model, env: { ...analysis.model.env, envFilesPresent: [...new Set([...analysis.model.env.envFilesPresent, ...names])].sort() } });
     if (stale.length && localEnv.length) {
+      const withEnv = (names: string[]): ProjectModel => ({ ...model, env: { ...model.env, envFilesPresent: [...new Set([...model.env.envFilesPresent, ...names])].sort() } });
       const all = (1 << localEnv.length) - 1;
       const masks = localEnv.length <= 3 ? Array.from({ length: all }, (_, i) => i + 1).reverse() : [all];
       for (const mask of masks) {
-        const variant = await staleDocs(withEnv(localEnv.filter((_, i) => mask & (1 << i))));
-        if (mask === all || !variant.length) stale = variant;
-        if (!variant.length) break;
+        if (!(await staleDocs(withEnv(localEnv.filter((_, i) => mask & (1 << i))))).length) {
+          stale = [];
+          break;
+        }
+      }
+      if (stale.length) {
+        await Promise.all(localEnv.map((n) => linkOrCopy(path.join(root, n), path.join(snapRoot, n))));
+        try {
+          stale = await staleDocs(await analyze());
+        } finally {
+          await Promise.all(localEnv.map((n) => fs.rm(path.join(snapRoot, n), { force: true })));
+        }
       }
     }
     return { inSync: stale.length === 0, stale, files: snap.entries, fromIndex: snap.fromIndex, durationMs: Date.now() - started };
