@@ -133,41 +133,91 @@ export async function gitOrThrow(cwd: string, args: string[], opts: GitRunOption
   return r.stdout;
 }
 
-export async function gitAvailable(): Promise<boolean> {
-  return (await git(process.cwd(), ['--version'])).ok;
+/** Options accepted by the higher-level helpers below. */
+export interface GitCallOptions {
+  signal?: AbortSignal;
 }
 
-export async function isGitRepo(cwd: string): Promise<boolean> {
-  const r = await git(cwd, ['rev-parse', '--is-inside-work-tree']);
+let availability: Promise<boolean> | null = null;
+
+/** Is a `git` executable on PATH? Checked once per process (an aborted check is not cached). */
+export function gitAvailable(opts: GitCallOptions = {}): Promise<boolean> {
+  if (availability) return availability;
+  const p = git(process.cwd(), ['--version'], { signal: opts.signal }).then((r) => {
+    if (r.aborted && availability === p) availability = null;
+    return r.ok;
+  });
+  availability = p;
+  return p;
+}
+
+/** Test hook: forget the memoized `gitAvailable()` result. */
+export function resetGitAvailableCache(): void {
+  availability = null;
+}
+
+export async function isGitRepo(cwd: string, opts: GitCallOptions = {}): Promise<boolean> {
+  const r = await git(cwd, ['rev-parse', '--is-inside-work-tree'], { signal: opts.signal });
   return r.ok && r.stdout.trim() === 'true';
 }
 
-export async function gitInfo(cwd: string): Promise<GitInfo> {
-  const info: GitInfo = { available: await gitAvailable(), isRepo: false, hotspots: [] };
-  if (!info.available) return info;
-  info.isRepo = await isGitRepo(cwd);
-  if (!info.isRepo) return info;
-  const [branch, head, date, authors, log] = await Promise.all([
-    git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']),
-    git(cwd, ['rev-parse', 'HEAD']),
-    git(cwd, ['log', '-1', '--format=%cI']),
-    git(cwd, ['shortlog', '-sn', '--no-merges', 'HEAD']),
-    git(cwd, ['log', '--since=180.days', '--name-only', '--format=', '--no-merges', '--relative', '-n', '2000', '--', '.']),
+/** How much history `gitInfo` reads for hotspots and the contributor count. */
+export const HISTORY_DAYS = 180;
+export const HISTORY_MAX_COMMITS = 2000;
+
+export interface GitInfoOptions extends GitCallOptions {
+  historyDays?: number;
+  maxCommits?: number;
+}
+
+const AUTHOR_MARK = '\x1e';
+
+/**
+ * Summarize the repository. All git processes run concurrently, and history is
+ * read once, bounded by `historyDays`/`maxCommits`, for both the hotspots and the
+ * contributor count. `contributorCount` is therefore the number of distinct
+ * (mailmap-normalized) authors of non-merge commits touching this directory in
+ * that window, not over the whole history.
+ */
+export async function gitInfo(cwd: string, opts: GitInfoOptions = {}): Promise<GitInfo> {
+  const { signal } = opts;
+  const days = opts.historyDays ?? HISTORY_DAYS;
+  const maxCommits = opts.maxCommits ?? HISTORY_MAX_COMMITS;
+  const run = (args: string[]) => git(cwd, args, { signal });
+  // Nothing below depends on another call's result, so start everything at once;
+  // results are simply ignored when git is missing or this is not a work tree.
+  const [available, isRepo, branch, head, date, log] = await Promise.all([
+    gitAvailable({ signal }),
+    isGitRepo(cwd, { signal }),
+    run(['rev-parse', '--abbrev-ref', 'HEAD']),
+    run(['rev-parse', 'HEAD']),
+    run(['log', '-1', '--format=%cI']),
+    run(['log', `--since=${days}.days`, `--max-count=${maxCommits}`, '--no-merges', `--format=${AUTHOR_MARK}%aN`, '--name-only', '--relative', '--', '.']),
   ]);
+  signal?.throwIfAborted();
+  const info: GitInfo = { available, isRepo: false, hotspots: [] };
+  if (!info.available) return info;
+  info.isRepo = isRepo;
+  if (!info.isRepo) return info;
   if (branch.ok) info.branch = branch.stdout.trim();
   if (head.ok) info.head = head.stdout.trim();
   if (date.ok && date.stdout.trim()) info.lastCommitDate = date.stdout.trim();
-  // Count only — contributor names are personal data and not needed.
-  if (authors.ok) info.contributorCount = authors.stdout.split('\n').filter((l) => l.trim()).length;
   if (log.ok) {
+    // Count only — contributor names are personal data and are not kept.
+    const authors = new Set<string>();
     const counts = new Map<string, number>();
     for (const line of log.stdout.split('\n')) {
+      if (line.startsWith(AUTHOR_MARK)) {
+        authors.add(line.slice(1));
+        continue;
+      }
       const p = line.trim();
       // Athena's own output is not a code hotspot; counting it would make every knowledge commit change the hotspots.
       if (!p || p === '.athena' || p.startsWith('.athena/')) continue;
       const dir = p.includes('/') ? p.split('/').slice(0, 2).join('/') : '.';
       counts.set(dir, (counts.get(dir) ?? 0) + 1);
     }
+    info.contributorCount = authors.size;
     info.hotspots = [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).slice(0, 10).map(([path, commits]) => ({ path, commits }));
   }
   return info;
@@ -180,10 +230,9 @@ export interface ChangedFile {
 }
 
 /** Working-tree changes (staged, unstaged, untracked) relative to HEAD. */
-export async function workingChanges(cwd: string): Promise<ChangedFile[] | null> {
-  const r = await git(cwd, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.']);
+export async function workingChanges(cwd: string, opts: GitCallOptions = {}): Promise<ChangedFile[] | null> {
+  const [r, prefix] = await Promise.all([git(cwd, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.'], { signal: opts.signal }), repoPrefix(cwd, opts)]);
   if (!r.ok) return null;
-  const prefix = await repoPrefix(cwd);
   const out: ChangedFile[] = [];
   const parts = r.stdout.split('\0');
   for (let i = 0; i < parts.length; i++) {
@@ -203,8 +252,8 @@ export async function workingChanges(cwd: string): Promise<ChangedFile[] | null>
 }
 
 /** Path of `cwd` relative to the repository root ("" at the root). Git reports paths repo-relative. */
-export async function repoPrefix(cwd: string): Promise<string> {
-  const r = await git(cwd, ['rev-parse', '--show-prefix']);
+export async function repoPrefix(cwd: string, opts: GitCallOptions = {}): Promise<string> {
+  const r = await git(cwd, ['rev-parse', '--show-prefix'], { signal: opts.signal });
   return r.ok ? r.stdout.trim() : '';
 }
 
@@ -219,13 +268,13 @@ function stripPrefix(files: ChangedFile[], prefix: string): ChangedFile[] {
  * Files changed on HEAD since it diverged from `fromRef` (`merge-base..HEAD`, the
  * same range a pull request shows). Returns null when the range can't be computed.
  */
-export async function changesSince(cwd: string, fromRef: string): Promise<ChangedFile[] | null> {
+export async function changesSince(cwd: string, fromRef: string, opts: GitCallOptions = {}): Promise<ChangedFile[] | null> {
   // Accept commit SHAs and ordinary ref expressions (HEAD~1, origin/main, v1.2.3),
   // but never anything that could be read as an option or shell metacharacter.
   if (!isSafeRef(fromRef)) return null;
-  const mb = await git(cwd, ['merge-base', fromRef, 'HEAD']);
+  const mb = await git(cwd, ['merge-base', fromRef, 'HEAD'], { signal: opts.signal });
   if (!mb.ok || !mb.stdout.trim()) return null;
-  const r = await git(cwd, ['diff', '--name-status', '-M', '-z', '--relative', '--no-color', mb.stdout.trim(), 'HEAD', '--', '.']);
+  const r = await git(cwd, ['diff', '--name-status', '-M', '-z', '--relative', '--no-color', mb.stdout.trim(), 'HEAD', '--', '.'], { signal: opts.signal });
   if (!r.ok) return null;
   return parseNameStatusZ(r.stdout);
 }
@@ -268,13 +317,13 @@ export interface HeadMovement {
   truncated: boolean;
 }
 
-export async function headMovement(cwd: string, from: string, to: string, limit = 20): Promise<HeadMovement | null> {
+export async function headMovement(cwd: string, from: string, to: string, limit = 20, opts: GitCallOptions = {}): Promise<HeadMovement | null> {
   if (!/^[0-9a-f]{7,64}$/i.test(from) || !/^[0-9a-f]{7,64}$/i.test(to)) return null;
   if (from === to) return { commits: [], diverged: false, truncated: false };
-  const exists = await git(cwd, ['cat-file', '-e', `${from}^{commit}`]);
+  const { signal } = opts;
+  const exists = await git(cwd, ['cat-file', '-e', `${from}^{commit}`], { signal });
   if (!exists.ok) return { commits: [], diverged: true, truncated: false };
-  const ancestor = await git(cwd, ['merge-base', '--is-ancestor', from, to]);
-  const log = await git(cwd, ['log', `-n${limit + 1}`, '--format=%H%x1f%s', `${from}..${to}`]);
+  const [ancestor, log] = await Promise.all([git(cwd, ['merge-base', '--is-ancestor', from, to], { signal }), git(cwd, ['log', `-n${limit + 1}`, '--format=%H%x1f%s', `${from}..${to}`], { signal })]);
   if (!log.ok) return null;
   const commits = log.stdout
     .split('\n')

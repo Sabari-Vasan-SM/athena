@@ -47,13 +47,17 @@ export class IgnoreMatcher {
     const test = isDir ? `${rel}/` : rel;
     if (this.include?.ignores(test)) return false;
     if (this.base.ignores(test)) return true;
-    for (const [dir, ig] of this.scoped) {
-      if (dir === '') {
-        if (ig.ignores(test)) return true;
-      } else if (rel.startsWith(`${dir}/`)) {
-        const sub = rel.slice(dir.length + 1);
-        if (ig.ignores(isDir ? `${sub}/` : sub)) return true;
-      }
+    if (!this.scoped.size) return false;
+    const rootRules = this.scoped.get('');
+    if (rootRules?.ignores(test)) return true;
+    // Only the path's own ancestor directories can have a .gitignore that applies
+    // (dir D applies when rel starts with "D/"), so look those up: O(depth), not
+    // O(number of .gitignore files).
+    for (let i = rel.indexOf('/'); i > 0; i = rel.indexOf('/', i + 1)) {
+      const ig = this.scoped.get(rel.slice(0, i));
+      if (!ig) continue;
+      const sub = rel.slice(i + 1);
+      if (ig.ignores(isDir ? `${sub}/` : sub)) return true;
     }
     return false;
   }

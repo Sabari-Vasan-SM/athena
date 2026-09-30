@@ -1,9 +1,12 @@
+// Verbatim copy of src/core/graph/graph.ts as of 0.2.1, kept only as the reference
+// implementation for the graph equivalence test (tests/unit/graph.test.ts).
+
 import { z } from 'zod';
 import path from 'node:path';
-import { ProjectModel } from '../model/project-model.js';
-import { readTextIfExists, writeFileAtomic } from '../util/fs.js';
-import { athenaDir } from '../state/state.js';
-import { toPosix } from '../util/paths.js';
+import { ProjectModel } from '../../../src/core/model/project-model.js';
+import { readTextIfExists, writeFileAtomic } from '../../../src/core/util/fs.js';
+import { athenaDir } from '../../../src/core/state/state.js';
+import { toPosix } from '../../../src/core/util/paths.js';
 
 /**
  * The project graph: a structured view of what the analysis found and how the
@@ -55,28 +58,17 @@ export interface BuildOptions {
   signal?: AbortSignal;
 }
 
-const RESOLVE_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.py', '.vue', '.svelte'];
-
 function resolveImport(fromFile: string, spec: string, fileSet: Set<string>): string | null {
   if (!spec.startsWith('.')) return null; // package import, not a project file
   const base = toPosix(path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), spec)));
-  if (fileSet.has(base)) return base;
-  // Same candidate order as before, but stop at the first hit instead of building all 31.
-  for (const ext of RESOLVE_EXTS) {
-    for (const c of [`${base}${ext}`, `${base}/index${ext}`, `${base}/__init__${ext}`]) if (fileSet.has(c)) return c;
-  }
-  return null;
+  const candidates = [base, ...['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.py', '.vue', '.svelte'].flatMap((ext) => [`${base}${ext}`, `${base}/index${ext}`, `${base}/__init__${ext}`])];
+  return candidates.find((c) => fileSet.has(c)) ?? null;
 }
-
-/** Same ordering as `a.localeCompare(b)` (both use the default-locale collator), without per-call setup. */
-const compare = new Intl.Collator().compare;
 
 /** Build the graph from an analyzed model. Import edges are parsed only for files the model references. */
 export async function buildGraph(model: ProjectModel, opts: BuildOptions): Promise<ProjectGraph> {
   const nodes = new Map<string, GraphNode>();
   const edges: GraphEdge[] = [];
-  // `from\0to\0kind` of every edge, so de-duplication is O(1) instead of a scan.
-  const edgeKeys = new Set<string>();
   const fileSet = new Set(opts.files);
   const addNode = (n: GraphNode) => {
     if (!nodes.has(n.id)) nodes.set(n.id, n);
@@ -84,10 +76,7 @@ export async function buildGraph(model: ProjectModel, opts: BuildOptions): Promi
   };
   const addEdge = (from: string, to: string, kind: EdgeKind) => {
     if (from === to || !nodes.has(from) || !nodes.has(to)) return;
-    const key = `${from}\0${to}\0${kind}`;
-    if (edgeKeys.has(key)) return;
-    edgeKeys.add(key);
-    edges.push({ from, to, kind });
+    if (!edges.some((e) => e.from === from && e.to === to && e.kind === kind)) edges.push({ from, to, kind });
   };
   const fileNode = (p: string) => addNode({ id: nodeId('file', p), kind: 'file', name: path.posix.basename(p), path: p, meta: {} });
 
@@ -99,14 +88,10 @@ export async function buildGraph(model: ProjectModel, opts: BuildOptions): Promi
     for (const dep of pkg.internalDependencies) addEdge(nodeId('package', pkg.name), nodeId('package', dep), 'depends_on');
   }
 
-  // First package declared at each path (what `packages.find(p => p.path === x)` returns).
-  const packageAtPath = new Map<string, ProjectModel['workspace']['packages'][number]>();
-  for (const pkg of model.workspace.packages) if (!packageAtPath.has(pkg.path)) packageAtPath.set(pkg.path, pkg);
-
   // Frameworks
   for (const f of model.frameworks) {
     const id = addNode({ id: nodeId('framework', `${f.name}@${f.root}`), kind: 'framework', name: f.name, path: f.root, meta: { category: f.category, status: f.provenance.status, confidence: f.provenance.confidence } });
-    const owner = packageAtPath.get(f.root);
+    const owner = model.workspace.packages.find((p) => p.path === f.root);
     if (owner) addEdge(nodeId('package', owner.name), id, 'contains');
   }
 
@@ -117,17 +102,12 @@ export async function buildGraph(model: ProjectModel, opts: BuildOptions): Promi
   }
 
   // Entities → defining files
-  const entityByName = new Map<string, (typeof model.dbEntities)[number]>();
-  for (const x of model.dbEntities) {
-    const k = x.name.toLowerCase();
-    if (!entityByName.has(k)) entityByName.set(k, x);
-  }
   for (const e of model.dbEntities) {
     const id = addNode({ id: nodeId('entity', `${e.name}@${e.file}`), kind: 'entity', name: e.name, path: e.file, meta: { kind: e.kind, fields: e.fields.length, indexes: e.indexes.length } });
     addEdge(id, fileNode(e.file), 'defines');
     for (const rel of e.relations) {
       const target = rel.split('→')[1]?.trim();
-      const other = target ? entityByName.get(target.toLowerCase()) : undefined;
+      const other = target ? model.dbEntities.find((x) => x.name.toLowerCase() === target.toLowerCase()) : undefined;
       if (other) addEdge(id, nodeId('entity', `${other.name}@${other.file}`), 'depends_on');
     }
   }
@@ -142,16 +122,11 @@ export async function buildGraph(model: ProjectModel, opts: BuildOptions): Promi
   for (const d of model.containers.dockerfiles) addNode({ id: nodeId('infra', `Dockerfile@${d.path}`), kind: 'infra', name: 'Dockerfile', path: d.path, meta: { kind: 'container' } });
   for (const s of model.containers.services) addNode({ id: nodeId('infra', `service:${s.name}@${s.file}`), kind: 'infra', name: s.name, path: s.file, meta: { kind: 'service', image: s.image ?? '' } });
 
-  // File → package membership: the deepest package whose directory contains the
-  // file. A package path P contains the file exactly when the file path has a "/"
-  // right after the prefix P, so only the file's own ancestor prefixes need a lookup.
+  // File → package membership
   for (const n of [...nodes.values()].filter((x) => x.kind === 'file' && x.path)) {
-    const p = n.path!;
-    let owner: ProjectModel['workspace']['packages'][number] | undefined;
-    for (let i = p.lastIndexOf('/'); i >= 0 && !owner; i = i > 0 ? p.lastIndexOf('/', i - 1) : -1) {
-      const prefix = p.slice(0, i);
-      if (prefix !== '.') owner = packageAtPath.get(prefix);
-    }
+    const owner = model.workspace.packages
+      .filter((p) => p.path !== '.' && n.path!.startsWith(`${p.path}/`))
+      .sort((a, b) => b.path.length - a.path.length)[0];
     if (owner) addEdge(nodeId('package', owner.name), n.id, 'contains');
   }
 
@@ -159,10 +134,9 @@ export async function buildGraph(model: ProjectModel, opts: BuildOptions): Promi
   const maxImportFiles = opts.maxImportFiles ?? 2000;
   const queue = [...nodes.values()].filter((n) => n.kind === 'file').map((n) => n.path!);
   const parsed = new Set<string>();
-  let head = 0; // queue read index: shift() would make the loop quadratic
-  while (head < queue.length && parsed.size < maxImportFiles) {
+  while (queue.length && parsed.size < maxImportFiles) {
     opts.signal?.throwIfAborted();
-    const p = queue[head++]!;
+    const p = queue.shift()!;
     if (parsed.has(p)) continue;
     parsed.add(p);
     const n = { id: nodeId('file', p) };
@@ -187,8 +161,8 @@ export async function buildGraph(model: ProjectModel, opts: BuildOptions): Promi
   return {
     schemaVersion: 1,
     builtAt: new Date().toISOString(),
-    nodes: [...nodes.values()].sort((a, b) => compare(a.id, b.id)),
-    edges: edges.sort((a, b) => compare(a.from, b.from) || compare(a.to, b.to)),
+    nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)),
+    edges: edges.sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to)),
     stats: { nodes: nodes.size, edges: edges.length, byKind },
   };
 }
@@ -213,47 +187,13 @@ export interface Neighborhood {
   edges: Array<{ edge: GraphEdge; other: GraphNode; direction: 'out' | 'in' }>;
 }
 
-interface GraphIndex {
-  byId: Map<string, GraphNode>;
-  nodeCount: number;
-  edgeCount: number;
-  /** Node id → indexes into `graph.edges` of edges touching it (ascending). */
-  incident: Map<string, number[]>;
-}
-
-// Graphs are treated as immutable once built or loaded; the index is built once per
-// object (and rebuilt if its node/edge count changes).
-const indexes = new WeakMap<ProjectGraph, GraphIndex>();
-
-function graphIndex(graph: ProjectGraph): GraphIndex {
-  let idx = indexes.get(graph);
-  if (idx && idx.nodeCount === graph.nodes.length && idx.edgeCount === graph.edges.length) return idx;
-  const byId = new Map<string, GraphNode>();
-  // Map(graph.nodes.map(...)) semantics: the last node with a given id wins.
-  for (const n of graph.nodes) byId.set(n.id, n);
-  const incident = new Map<string, number[]>();
-  const add = (id: string, i: number) => {
-    const list = incident.get(id);
-    if (!list) incident.set(id, [i]);
-    else if (list[list.length - 1] !== i) list.push(i);
-  };
-  graph.edges.forEach((e, i) => {
-    add(e.from, i);
-    add(e.to, i);
-  });
-  idx = { byId, incident, nodeCount: graph.nodes.length, edgeCount: graph.edges.length };
-  indexes.set(graph, idx);
-  return idx;
-}
-
 /** Nodes directly connected to `id`, in both directions. */
 export function neighbors(graph: ProjectGraph, id: string): Neighborhood | null {
   const node = graph.nodes.find((n) => n.id === id);
   if (!node) return null;
-  const { byId, incident } = graphIndex(graph);
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const out: Neighborhood['edges'] = [];
-  for (const i of incident.get(id) ?? []) {
-    const e = graph.edges[i]!;
+  for (const e of graph.edges) {
     if (e.from === id && byId.has(e.to)) out.push({ edge: e, other: byId.get(e.to)!, direction: 'out' });
     else if (e.to === id && byId.has(e.from)) out.push({ edge: e, other: byId.get(e.from)!, direction: 'in' });
   }
@@ -262,29 +202,23 @@ export function neighbors(graph: ProjectGraph, id: string): Neighborhood | null 
 
 /** Nodes within `depth` hops of any of the given files (used to expand task context). */
 export function expandFromFiles(graph: ProjectGraph, files: string[], depth = 1, limit = 40): GraphNode[] {
-  const { byId, incident } = graphIndex(graph);
-  const fileSet = new Set(files);
-  const seed = graph.nodes.filter((n) => n.path && fileSet.has(n.path));
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const seed = graph.nodes.filter((n) => n.path && files.includes(n.path));
   const seen = new Set(seed.map((n) => n.id));
-  let frontier = new Set(seen);
+  let frontier = [...seen];
   for (let d = 0; d < depth; d++) {
-    // Visit the frontier's edges in graph order, so discovery order (and thus
-    // which nodes survive `limit`) matches a full scan of graph.edges.
-    const touched = new Set<number>();
-    for (const id of frontier) for (const i of incident.get(id) ?? []) touched.add(i);
-    const next = new Set<string>();
-    for (const i of [...touched].sort((a, b) => a - b)) {
-      const e = graph.edges[i]!;
-      if (frontier.has(e.from) && !seen.has(e.to)) {
+    const next: string[] = [];
+    for (const e of graph.edges) {
+      if (frontier.includes(e.from) && !seen.has(e.to)) {
         seen.add(e.to);
-        next.add(e.to);
-      } else if (frontier.has(e.to) && !seen.has(e.from)) {
+        next.push(e.to);
+      } else if (frontier.includes(e.to) && !seen.has(e.from)) {
         seen.add(e.from);
-        next.add(e.from);
+        next.push(e.from);
       }
     }
     frontier = next;
-    if (!frontier.size) break;
+    if (!frontier.length) break;
   }
   return [...seen]
     .map((id) => byId.get(id))
