@@ -18,7 +18,6 @@ const removeStaleChunks: Plugin = {
       const outDir = path.resolve(build.initialOptions.outdir ?? 'dist');
       if (!existsSync(outDir)) return; // fresh checkout: nothing stale yet
       const fresh = new Set(result.outputFiles.map((f) => path.resolve(f.path)));
-      if (!existsSync(outDir)) return; // first build: nothing stale yet
       for (const entry of readdirSync(outDir, { withFileTypes: true })) {
         const file = path.join(outDir, entry.name);
         if (entry.isFile() && /\.js(\.map)?$/.test(entry.name) && !fresh.has(file)) rmSync(file, { force: true });

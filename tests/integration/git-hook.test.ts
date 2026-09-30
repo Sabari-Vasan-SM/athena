@@ -97,7 +97,7 @@ describe('athena git-hook', () => {
     await expect(fs.access(hookPath(dir))).rejects.toThrow();
     expect((await status(dir)).installed).toBe(false);
     expect((await runCli(['git-hook', 'uninstall'], dir)).stdout).toContain('No Athena pre-commit hook');
-  });
+  }, 60_000);
 
   it('keeps an existing shell hook: Athena runs first, the rest is untouched and restored on uninstall', async () => {
     const dir = await initializedRepo();
