@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-09-30
+
+Performance release: work is now proportional to what changed. On a 20,000-file repository (vs 0.2.1): a `sync --check` with nothing changed takes ~0.42 s instead of 2.9 s, `status` 0.14 s instead of 0.34 s, agent hooks start in ~28 ms instead of 112 ms, and peak memory is 20–52% lower in every scenario. The generated `model.json` is unchanged (golden-tested against the 0.2.1 analyzer). Benchmarks: `npm run bench`.
+
+After upgrading, the first run rebuilds `.athena/state.json` in the new format automatically. If you use the pre-commit hook, run `athena git-hook install` again so it checks staged content.
 
 ### Performance
 
