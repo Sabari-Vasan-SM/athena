@@ -42,11 +42,13 @@ const ATHENA_GITIGNORE = [
   '.server.json',
   '.sync-ignore.json',
   '.agent-events.jsonl',
+  '# Machine-local settings and secrets (never commit).',
+  'local.json',
   '',
 ].join('\n');
 
 /** Entries every .athena/.gitignore should carry; older projects are topped up in place. */
-const GITIGNORE_ENTRIES = ['state.json', 'model.json', 'graph.json', 'security-scan.json', 'ai-suggestions.md', '.backup/', '.server.json', '.sync-ignore.json', '.agent-events.jsonl'];
+const GITIGNORE_ENTRIES = ['state.json', 'model.json', 'graph.json', 'security-scan.json', 'ai-suggestions.md', '.backup/', '.server.json', '.sync-ignore.json', '.agent-events.jsonl', 'local.json'];
 
 async function ensureGitignoreEntries(file: string): Promise<void> {
   const existing = await readTextIfExists(file);
