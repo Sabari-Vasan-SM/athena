@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- `athena open` reuses parsed `.athena` artifacts: a new `ProjectSession` loads `model.json`, `graph.json`, `security-scan.json` and `state.json` once and re-reads them only when the file changes (inode, size or mtime). The overview, graph, context, security and `athena security` paths share it, and the graph summary checks for `model.json` with a stat instead of parsing and validating the whole model.
+- The event stream (`/api/events`) coalesces bursts into one write per 250 ms (intermediate activity states collapse to the latest), serializes each event once for all clients, and applies backpressure: a client that stops reading gets nothing more until its socket drains, keeps at most 100 queued events (oldest dropped) plus the latest activity, and then receives a `resync` frame with the number of events it missed. At most 16 event streams are open at once (503 beyond that).
+- `GET /api/sync` no longer includes each proposed document's full diff; the Sync page fetches a diff from the new `GET /api/sync/:doc` only when the document is expanded.
+
+### Changed
+
+- The local server is split into route modules (`src/server/routes/*`) sharing one server context; routes, authentication, Host/Origin checks, security headers, CSP and rate limiting are unchanged.
+- `GET /api/sync` returns the proposal without `documents[].diff` (reasons, changed and preserved sections, additions/deletions and `diffTruncated` are still included). New `GET /api/sync/:doc[?planId=…]` returns one proposed document's diff; the id must be a knowledge document in the current proposal (404 otherwise, 409 when `planId` is stale). `POST /api/sync/check` still returns the full plan.
+- A corrupted `model.json` now gives a clear error with a hint (`model.json is corrupted (…)`, run `athena analyze`) instead of an internal error when starting a security scan from the web UI.
+- Test, source, auth, API and schema path patterns now come from one module (`src/core/patterns.ts`). `athena review` recognizes more test layouts (`integration_tests/`, `androidTest/`, `test_driver/`, `*_test.dart`), and change impact recognizes the same test files as review plus test runner configs.
+
 ## 0.2.1 — 2026-09-30
 
 Security release. Upgrading is recommended for everyone. After upgrading, run `athena sync` once (the `security.md` format changed) and, if you use the pre-commit hook with `--review`, run `athena git-hook install --review` again so it reviews staged changes.

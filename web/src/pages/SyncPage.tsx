@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api, ApiError } from '../lib/api';
 import { Link, timeAgo } from '../lib/router';
 import { useApi, useLive } from '../lib/store';
-import type { SyncPlan, SyncStatus } from '../lib/types';
+import type { DocId, SyncDocDiff, SyncPlan, SyncStatus } from '../lib/types';
 import { DiffView } from '../components/DiffView';
 import { Badge, Card, Empty, ErrorNote, Spinner } from '../components/ui';
 
@@ -33,6 +33,14 @@ function FileChanges({ plan }: { plan: SyncPlan }) {
       )}
     </>
   );
+}
+
+/** Loaded only when a document is expanded: GET /api/sync returns the plan without diffs. */
+function ProposedDiff({ planId, id }: { planId: string; id: DocId }) {
+  const { data, error } = useApi<SyncDocDiff>(`/api/sync/${encodeURIComponent(id)}?planId=${planId}`, [planId]);
+  if (error) return <ErrorNote error={error} />;
+  if (!data || data.planId !== planId) return <p className="muted"><Spinner label="Loading diff" /> Loading diff…</p>;
+  return <DiffView patch={data.diff} truncated={data.diffTruncated} />;
 }
 
 export function SyncPage() {
@@ -173,7 +181,7 @@ export function SyncPage() {
                   {d.preservedSections.length > 0 && (
                     <div className="note note--info">Your edits in <span className="mono">{d.preservedSections.join(', ')}</span> are kept and not overwritten.</div>
                   )}
-                  {expanded && <DiffView patch={d.diff} truncated={d.diffTruncated} />}
+                  {expanded && <ProposedDiff planId={plan.id} id={d.id} />}
                 </article>
               );
             })}

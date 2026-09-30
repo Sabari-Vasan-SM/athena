@@ -151,11 +151,22 @@ export interface ProposedDocument {
   reasons: string[];
   changedSections: string[];
   preservedSections: string[];
-  diff: string;
+  /** The diff itself is fetched on demand from GET /api/sync/:id (see SyncDocDiff). */
   diffTruncated: boolean;
   additions: number;
   deletions: number;
   baseHash: string | null;
+}
+
+/** GET /api/sync/:id — one proposed document's unified diff. */
+export interface SyncDocDiff {
+  planId: string;
+  id: DocId;
+  file: string;
+  diff: string;
+  diffTruncated: boolean;
+  additions: number;
+  deletions: number;
 }
 
 export interface SyncPlan {
