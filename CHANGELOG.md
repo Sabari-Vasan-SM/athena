@@ -12,6 +12,7 @@
 
 ### Security
 
+- `athena security --fail-on` now also fails when an audit tool ran but failed or timed out, since nothing was checked. A tool that isn't installed is still only reported. The web UI shows `unrated` findings.
 - **AI credential exfiltration**: a repository could set its own `ai.baseUrl` and `ai.consent` in `.athena/config.json` and receive your API key and knowledge. Both are now read only from machine-local sources (env > `.athena/local.json` > user config), providers refuse a base URL without a trusted source, and an Ollama endpoint that isn't loopback counts as remote and needs consent.
 - **Local server**: per-client rate limiting on `/api/*` (token bucket, 30 req/s, burst 120, 429 when exceeded); `--allow-remote` keeps the Host/Origin allowlist (bind address plus loopback) instead of disabling it, and warns that the connection is plain HTTP; `/api/context` clamps `maxChars` to 200,000; a failed security-scan start (e.g. missing `model.json`) no longer leaves every later scan stuck at 423; shutdown no longer hangs on open event streams.
 - **MCP**: every tool that returns repository content redacts secret-looking values and wraps the text in `<athena-document path="…" trust="untrusted-data">` delimiters with a note that it is project data, not instructions (embedded delimiters are neutralized).

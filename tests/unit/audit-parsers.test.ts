@@ -15,7 +15,7 @@ import {
 } from '../../src/services/security.js';
 import { SecurityScan as SecurityScanSchema } from '../../src/core/model/security-scan.js';
 import { emptyModel } from '../../src/core/model/project-model.js';
-import { cleanupProjects, makeProject, REPO_ROOT } from '../helpers.js';
+import { cleanupProjects, makeProject, REPO_ROOT, runCli } from '../helpers.js';
 
 const FIXTURES = path.join(REPO_ROOT, 'tests', 'fixtures', 'audit');
 const fixture = (name: string) => readFileSync(path.join(FIXTURES, name), 'utf8');
@@ -187,6 +187,18 @@ describe('runSecurityScan with fake audit tools', () => {
     const npm = scan.tools.find((t) => t.tool === 'npm audit');
     expect(npm?.status).toBe('failed');
     expect(npm?.message).toMatch(/ENOTFOUND/);
+  });
+
+  it.skipIf(process.platform === 'win32')('--fail-on fails when an audit tool failed, instead of passing unchecked', async () => {
+    const dir = await makeProject({ 'package.json': '{"name":"x"}', 'package-lock.json': '{"lockfileVersion":3}', '.gitignore': '.fakebin\n' });
+    await fakeBin(dir, 'npm', `cat '${path.join(FIXTURES, 'npm-error.json')}'\nexit 1`);
+    const env = { PATH: process.env.PATH! };
+    expect((await runCli(['init', '--no-agents', '--quiet'], dir, env)).code).toBe(0);
+    const r = await runCli(['security', '--fail-on', 'high'], dir, env);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/npm audit failed/);
+    // Without --fail-on the scan still reports, and exits 0.
+    expect((await runCli(['security'], dir, env)).code).toBe(0);
   });
 
   it.skipIf(process.platform === 'win32')('npm audit exiting 1 with vulnerabilities is a successful run', async () => {

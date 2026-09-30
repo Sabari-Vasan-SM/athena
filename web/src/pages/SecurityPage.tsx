@@ -10,9 +10,9 @@ const SEVERITY_TONE: Record<Severity, 'red' | 'yellow' | 'blue' | 'neutral'> = {
   high: 'red',
   moderate: 'yellow',
   low: 'blue',
-  unknown: 'neutral',
+  unrated: 'neutral',
 };
-const ORDER: Severity[] = ['critical', 'high', 'moderate', 'low', 'unknown'];
+const ORDER: Severity[] = ['critical', 'high', 'moderate', 'low', 'unrated'];
 
 export function SecurityPage() {
   const { revision, toast, activity } = useLive();
@@ -110,7 +110,7 @@ export function SecurityPage() {
                         <td>{f.url ? <a href={f.url} target="_blank" rel="noopener noreferrer">{f.title}</a> : f.title}</td>
                         <td className="mono">{f.id ?? '—'}</td>
                         <td className="muted">{f.tool}</td>
-                        <td>{f.fixAvailable ? 'available' : 'unknown'}</td>
+                        <td>{f.fixAvailable === true ? 'available' : f.fixAvailable === false ? 'none reported' : 'unknown'}</td>
                       </tr>
                     ))}
                   </tbody>

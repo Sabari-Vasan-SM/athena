@@ -179,7 +179,7 @@ export interface SyncStatus {
   plan: SyncPlan | null;
 }
 
-export type Severity = 'critical' | 'high' | 'moderate' | 'low' | 'unknown';
+export type Severity = 'critical' | 'high' | 'moderate' | 'low' | 'unrated';
 
 export interface Vulnerability {
   package: string;

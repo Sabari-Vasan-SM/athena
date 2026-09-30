@@ -157,6 +157,14 @@ export async function securityCommand(opts: SecurityOptions): Promise<number> {
       }
       explain(`athena security: warning: ${unrated.length} unrated finding(s) from ${tools} were not counted toward --fail-on ${level} (--unrated warn).`);
     }
+    // A tool that ran but failed or timed out checked nothing, so it can't count as a pass.
+    const broken = scan.tools.filter((t) => t.status === 'failed' || t.status === 'timeout');
+    if (broken.length) {
+      explain(`athena security: failing (--fail-on ${level}): ${broken.map((t) => `${t.tool} ${t.status}`).join(', ')}, so those dependencies were not checked.`);
+      return 1;
+    }
+    const missing = scan.tools.filter((t) => t.status === 'unavailable');
+    if (missing.length) explain(`athena security: note: not checked because the tool is unavailable: ${missing.map((t) => t.tool).join(', ')}.`);
   }
   return EXIT.OK;
 }
