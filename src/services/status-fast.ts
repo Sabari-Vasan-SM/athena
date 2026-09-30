@@ -103,12 +103,12 @@ export async function fastIndexChanges(root: string, config: AthenaConfig, prevI
     const rel = rec.slice(tab + 1);
     if (mode === '160000') return null; // submodule: the walk descends into it
     if (mode === '120000' && statSync(path.join(root, rel), { throwIfNoEntry: false })?.isDirectory()) return null; // symlinked directory
-    if (!(rel in prevIndex)) candidates.add(rel);
+    if (!Object.hasOwn(prevIndex, rel)) candidates.add(rel);
   }
   for (const rel of untracked.stdout.split('\0')) {
     if (!rel) continue;
     if (rel.endsWith('/')) return null; // nested repository: the walk descends into it
-    if (!(rel in prevIndex)) candidates.add(rel);
+    if (!Object.hasOwn(prevIndex, rel)) candidates.add(rel);
   }
 
   const matcher = await IgnoreMatcher.load(root, config);
@@ -157,7 +157,7 @@ export async function fastIndexChanges(root: string, config: AthenaConfig, prevI
   // A changed .gitignore changes what the walk would include.
   if ([...diff.added, ...diff.modified, ...diff.deleted].some((p) => p === '.gitignore' || p.endsWith('/.gitignore'))) return null;
   // The walk stops at maxFiles.
-  if (indexPaths.length - diff.deleted.length + diff.added.length >= config.maxFiles) return null;
+  if (indexPaths.length - diff.deleted.length + diff.added.length > config.maxFiles) return null;
 
   diff.added.sort(byPath);
   diff.modified.sort(byPath);

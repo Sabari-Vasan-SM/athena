@@ -111,7 +111,7 @@ export async function incrementalWalk(root: string, config: AthenaConfig, config
     );
   }
 
-  if (byPath.size >= config.maxFiles) return null;
+  if (byPath.size > config.maxFiles) return null;
   // Copies: the analysis fills in hashes and must never mutate the snapshot.
   const files = [...byPath.values()].map((f) => ({ ...f }));
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
