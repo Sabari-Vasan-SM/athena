@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- `athena event` (run by agent hooks on every tool call) starts about 2.5× faster and uses about 40% less memory (p50 112 ms / 100 MB → ~45 ms / 57 MB on the 20k-file benchmark): it no longer loads commander or any other command's dependencies. All other commands load their code on demand, which also lowers memory for `status`, `review` and `sync`.
+- The CLI is now built with code splitting: `dist/cli.js` is a small entry that loads chunks from `dist/` as needed.
+- Project graph building is linear in the number of edges (edge de-duplication, import traversal and package lookups no longer rescan everything); 50k import edges now build in about 0.1 s instead of 3.2 s, and 100k in about 0.25 s. Graph output is unchanged. `athena graph --node` and task-context expansion use a per-graph index.
+- Git metadata is collected with concurrent `git` processes, the `git --version` check runs once per process, and history is read once, bounded to the last 180 days / 2,000 commits. The contributor count in `model.json` (`git.contributorCount`) now counts authors in that window instead of the whole history.
+- Nested `.gitignore` matching only consults the path's own ancestor directories instead of every `.gitignore` in the project.
+
 ## 0.2.1 — 2026-09-30
 
 Security release. Upgrading is recommended for everyone. After upgrading, run `athena sync` once (the `security.md` format changed) and, if you use the pre-commit hook with `--review`, run `athena git-hook install --review` again so it reviews staged changes.
