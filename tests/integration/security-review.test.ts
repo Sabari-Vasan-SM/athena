@@ -8,6 +8,8 @@ import { loadScan, meetsThreshold, runSecurityScan, saveScan, type SecurityScan 
 import { reviewChanges, hasBlockers } from '../../src/services/review.js';
 import { analyzeProject } from '../../src/core/analyzer/analyze.js';
 import { cleanupProjects, FAKE, gitInit, makeProject, runCli } from '../helpers.js';
+import { createHash } from 'node:crypto';
+import { keyedFingerprint, readLocalConfig } from '../../src/core/local-config.js';
 
 afterAll(cleanupProjects);
 
@@ -35,7 +37,7 @@ const fakeScan = (overrides: Partial<SecurityScan> = {}): SecurityScan => ({
     { tool: 'npm audit', ecosystem: 'npm', status: 'ok', durationMs: 900, findings: [{ package: 'lodash', severity: 'critical', title: 'Command Injection in lodash', id: '1523', url: 'https://example.test/adv', fixAvailable: true }] },
     { tool: 'pip-audit', ecosystem: 'python', status: 'unavailable', message: 'pip-audit is not installed or not on PATH', durationMs: 1, findings: [] },
   ],
-  counts: { critical: 1, high: 0, moderate: 0, low: 0, unknown: 0 },
+  counts: { critical: 1, high: 0, moderate: 0, low: 0, unrated: 0 },
   secrets: { count: 0, files: [] },
   ...overrides,
 });
@@ -73,6 +75,40 @@ describe('security scan', () => {
     expect(JSON.stringify(scan)).not.toContain(FAKE.stripe);
   });
 
+  it('re-scans files for secrets instead of trusting a cached model', async () => {
+    const dir = await project({ 'src/keys.ts': `export const k = "${FAKE.stripe}";\n` });
+    const { model } = await analyzeProject(dir);
+    expect(model.security.secrets).toHaveLength(1);
+    // The secret is removed and a new one added after the model was built.
+    await fs.rm(path.join(dir, 'src/keys.ts'));
+    await fs.writeFile(path.join(dir, 'src/other.ts'), `export const t = "${FAKE.github}";\n`);
+    const scan = await runSecurityScan(dir, model, { skipAudit: true });
+    expect(scan.secrets.count).toBe(1);
+    expect(scan.secrets.files).toEqual(['src/other.ts']);
+  });
+
+  it('never stores an unsalted hash of a secret, and security.md has no fingerprint column', async () => {
+    const dir = await project({ 'src/keys.ts': `export const k = "${FAKE.stripe}";\n` });
+    await runPipeline({ root: dir, mode: 'analyze', agents: [] });
+    const plainHash = createHash('sha256').update(FAKE.stripe).digest('hex');
+    const modelJson = await fs.readFile(path.join(dir, '.athena/model.json'), 'utf8');
+    expect(modelJson).not.toContain(FAKE.stripe);
+    expect(modelJson).not.toContain(plainHash.slice(0, 12));
+    const salt = (await readLocalConfig(dir)).salt;
+    expect(salt).toMatch(/^[a-f0-9]{64}$/);
+    const model = JSON.parse(modelJson);
+    expect(model.security.secrets[0].fingerprint).toBe(keyedFingerprint(salt!, FAKE.stripe));
+
+    const doc = await fs.readFile(path.join(dir, '.athena/security.md'), 'utf8');
+    const section = doc.slice(doc.indexOf('## Secret Management'), doc.indexOf('## Risk Areas'));
+    expect(section).toContain('stripe-key');
+    expect(section).toContain('src/keys.ts:1');
+    expect(section).not.toMatch(/Fingerprint/i);
+    expect(section.replace(/<!--[^>]*-->/g, '')).not.toMatch(/\b[a-f0-9]{12,}\b/); // block-hash markers aside
+    expect(doc).not.toContain(plainHash.slice(0, 12));
+    expect(doc).not.toContain(model.security.secrets[0].fingerprint);
+  });
+
   it('persists scans and applies severity thresholds', async () => {
     const dir = await project();
     const scan = fakeScan();
@@ -80,7 +116,7 @@ describe('security scan', () => {
     expect((await loadScan(dir))?.tools[0]?.findings[0]?.package).toBe('lodash');
     expect(meetsThreshold(scan, 'critical')).toBe(true);
     expect(meetsThreshold(scan, 'low')).toBe(true);
-    expect(meetsThreshold(fakeScan({ tools: [], counts: { critical: 0, high: 0, moderate: 0, low: 0, unknown: 0 } }), 'low')).toBe(false);
+    expect(meetsThreshold(fakeScan({ tools: [], counts: { critical: 0, high: 0, moderate: 0, low: 0, unrated: 0 } }), 'low')).toBe(false);
   });
 
   it('records scan results in security.md via sync, attributed to the tool', async () => {
@@ -167,6 +203,24 @@ describe('CLI', () => {
     const bad = await runCli(['security', '--last', '--fail-on', 'nonsense'], dir);
     expect(bad.code).toBe(1);
     expect(bad.stderr).toContain('Invalid --fail-on');
+  }, 120_000);
+
+  it('athena security --fail-on fails on unrated findings unless --unrated warn', async () => {
+    const dir = await project();
+    await saveScan(dir, fakeScan({
+      tools: [{ tool: 'pip-audit', ecosystem: 'python', target: 'requirements.txt', status: 'ok', durationMs: 5, findings: [{ package: 'flask', severity: 'unrated', title: 'Denial of service', id: 'PYSEC-2019-179', fixAvailable: true }] }],
+      counts: { critical: 0, high: 0, moderate: 0, low: 0, unrated: 1 },
+    }));
+    const failing = await runCli(['security', '--last', '--fail-on', 'critical'], dir);
+    expect(failing.code).toBe(1);
+    expect(failing.stderr).toMatch(/unrated finding/);
+    expect(failing.stderr).toContain('--unrated warn');
+    const relaxed = await runCli(['security', '--last', '--fail-on', 'critical', '--unrated', 'warn'], dir);
+    expect(relaxed.code).toBe(0);
+    expect(relaxed.stderr).toMatch(/not counted/);
+    const bad = await runCli(['security', '--last', '--fail-on', 'high', '--unrated', 'maybe'], dir);
+    expect(bad.code).toBe(1);
+    expect(bad.stderr).toContain('Invalid --unrated');
   }, 120_000);
 
   it('athena review exits 1 on blockers and 0 when clean', async () => {

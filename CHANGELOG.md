@@ -6,6 +6,9 @@
 
 - `athena review --base <ref>` exits with code 2 when the base can't be resolved or has no merge base with HEAD. Shallow CI clones need full history, e.g. `actions/checkout` with `fetch-depth: 0`.
 - `ai.baseUrl` and `ai.consent` in the committed `.athena/config.json` are now ignored (with a warning in `athena ai status`, `athena ai enrich` and `athena doctor`). Move them to the environment (`ATHENA_AI_BASE_URL`, `ATHENA_AI_CONSENT=1`), `.athena/local.json` (gitignored), or your user config (`~/.config/athena/config.json`, `$XDG_CONFIG_HOME/athena/config.json`, or `%APPDATA%\athena\config.json` on Windows). `provider`, `model`, `mode` and `maxChars` still work from `.athena/config.json`.
+- `--fail-on` now fails on unrated findings by default (`--unrated warn` to relax).
+- `security-scan.json` and `athena security --json`: severity `unknown` has been renamed to `unrated`, in both findings and `counts`. Old scan files are still read. Tools that run once per input have a new optional `target` field (for example `pip-audit` per requirements file).
+- The `security.md` format changed: the Fingerprint column was removed from Secret Management. Run `athena sync` to update it.
 
 ### Security
 
@@ -23,6 +26,14 @@
 - The dependency check uses the analyzer's manifest parsers (`name =` / `version =` are no longer reported as dependencies), and a new manifest reports all of its dependencies.
 - New `athena review --staged` reviews the index (contents read from Git, untracked files ignored). The `--review` pre-commit hook now runs `athena review --staged --no-sync`, so unstaged or untracked files (such as a local `.env`) no longer block commits while staged secrets still do, and a review that can't run blocks the commit with its own message. Re-run `athena git-hook install --review` to update an installed hook.
 - Untracked files are read once, never through a symlink that points outside the project, and only up to 512 KB. Files that could not be checked are listed in a `skipped` warning (JSON: `incomplete`, `skipped`), and the review no longer says it found nothing to flag.
+- `athena security --fail-on` now counts findings the tool did not rate. pip-audit and govulncheck never report severity, so these findings were stored as `unknown` and never failed the build. They are now `unrated` and fail by default; `--unrated warn` reports them without failing.
+- pnpm audit output is parsed in pnpm's own advisories format. Before this, every pnpm project was reported as having no vulnerable dependencies.
+- An npm audit that reports an error (for example when offline) is now marked `failed` with npm's message. Before, it was reported as a clean audit. The same applies to empty or unrecognised output from any audit tool. npm exiting 1 because it found vulnerabilities still counts as a successful run.
+- govulncheck's multi-line JSON output is now parsed, and a vulnerability is reported only when govulncheck returns a finding for it. The title says whether the vulnerable code is called, only imported, or only required.
+- pip-audit now audits each `requirements*.txt` (`-r <file>`, at most 10), or a PEP 621 `pyproject.toml` as a project path. It no longer audits whichever Python environment is active. With nothing to audit, pip-audit is reported as `unavailable` with the reason "no requirements file to audit".
+- `athena security` scans the project files for secrets on every run. Before, it took the secret count from the cached `model.json`, so the count could be out of date.
+- Rewrote the secret patterns to remove catastrophic backtracking (ReDoS). `generic-secret-assignment` took over 1 s on 40 KB of crafted input. It now finds a bounded quoted value first, then checks the identifier before it (at most 64 chars) for a keyword. Private keys are matched by finding the BEGIN header and then the END within 16 KB. Open-ended token patterns now use bounded or lookbehind-anchored matches. Generic keyword patterns skip lines longer than 4096 characters. CI checks every pattern for time on crafted input and with the `recheck` ReDoS analyzer.
+- `security.md`, which is committed, no longer lists a fingerprint for each secret. The old value was an unsalted, truncated SHA-256 of the secret, so anyone could test guessed values against it offline. Secret fingerprints in `model.json` are now an HMAC keyed with the per-machine salt in `.athena/local.json` (gitignored), or with a random per-process key.
 
 ## 0.2.0 — 2026-09-26
 

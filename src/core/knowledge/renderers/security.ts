@@ -39,10 +39,11 @@ export function renderSecurity(m: ProjectModel, extras: KnowledgeExtras = {}): S
     content: ['## Security Controls (declared)', '', m.security.controls.length ? table(['Control', 'Evidence'], m.security.controls.map((c) => [esc(c.name), evidenceList(c.provenance.evidence, 2)])) : notDetected('security middleware or validation libraries'), '', '_Detected as dependencies. Whether they are applied to every relevant code path is **Unknown**._'].join('\n'),
   });
 
-  const secretRows = m.security.secrets.slice(0, 100).map((f) => [esc(f.type), code(`${f.file}:${f.line}`), code(f.fingerprint)]);
+  // This file is committed: record type and location only — no value, and no value-derived fingerprint.
+  const secretRows = m.security.secrets.slice(0, 100).map((f) => [esc(f.type), code(`${f.file}:${f.line}`)]);
   const secretBody: string[] = ['## Secret Management', ''];
   if (m.security.secrets.length) {
-    secretBody.push(`**Potential:** ${m.security.secrets.length} possible hardcoded secret(s). Values are never recorded; the fingerprint is a truncated SHA-256 for tracking. Review each and rotate any real credential.`, '', table(['Type', 'Location', 'Fingerprint'], secretRows));
+    secretBody.push(`**Potential:** ${m.security.secrets.length} possible hardcoded secret(s). Values are never recorded. Review each and rotate any real credential.`, '', table(['Type', 'Location'], secretRows));
   } else {
     secretBody.push('No likely secrets matched Athena\'s patterns in scanned files. This is **not** proof that no secrets exist (gitignored and oversized files are not scanned).');
   }
@@ -84,19 +85,20 @@ function renderDependencyRisks(m: ProjectModel, scan: SecurityScan | null): stri
   const lines = [...head, `Last scan: ${scan.scannedAt} (${(scan.durationMs / 1000).toFixed(1)}s). Findings come from the tools below, not from Athena.`, ''];
   const ran = scan.tools.filter((t) => t.status === 'ok');
   const missing = scan.tools.filter((t) => t.status !== 'ok');
-  const findings = ran.flatMap((t) => t.findings.map((f) => ({ ...f, tool: t.tool })));
+  const findings = ran.flatMap((t) => t.findings.map((f) => ({ ...f, tool: t.tool, target: t.target })));
 
   if (findings.length) {
     const rows = findings
       .slice(0, 60)
-      .map((f) => [esc(f.package), f.severity.toUpperCase(), esc(f.title.slice(0, 90)), esc(f.id ?? '—'), esc(f.tool), f.fixAvailable ? 'yes' : 'unknown']);
+      .map((f) => [esc(f.package), f.severity.toUpperCase(), esc(f.title.slice(0, 90)), esc(f.id ?? '—'), esc(f.target ? `${f.tool} (${f.target})` : f.tool), f.fixAvailable ? 'yes' : 'unknown']);
     lines.push(`**Detected by tooling:** ${findings.length} vulnerable dependenc${findings.length === 1 ? 'y' : 'ies'}.`, '', table(['Package', 'Severity', 'Advisory', 'ID', 'Tool', 'Fix available'], rows));
     if (findings.length > 60) lines.push('', `_Showing 60 of ${findings.length}. See \`.athena/security-scan.json\`._`);
+    if (findings.some((f) => f.severity === 'unrated')) lines.push('', '_UNRATED: the tool reports the vulnerability without a severity (pip-audit, govulncheck). Treat it as unreviewed, not as low._');
   } else if (ran.length) {
     lines.push(`**Detected:** no known vulnerable dependencies reported by ${ran.map((t) => esc(t.tool)).join(', ')} at the time of the scan.`);
   }
   if (missing.length) {
-    lines.push('', '**Unknown** — these ecosystems were not audited:', '', bullets(missing.map((t) => `${esc(t.tool)} (${esc(t.ecosystem)}): ${esc(t.message ?? t.status)}`)));
+    lines.push('', '**Unknown** — these ecosystems were not audited:', '', bullets(missing.map((t) => `${esc(t.tool)} (${esc(t.target ?? t.ecosystem)}): ${esc(t.message ?? t.status)}`)));
   }
   lines.push('', manifests, '', '_Athena does not maintain its own vulnerability database, and a clean audit is not proof that dependencies are safe._');
   return lines.join('\n');

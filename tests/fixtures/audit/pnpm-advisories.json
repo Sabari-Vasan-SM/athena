@@ -1,0 +1,76 @@
+{
+  "actions": [
+    {
+      "action": "update",
+      "module": "lodash",
+      "target": "4.17.21",
+      "resolves": [{ "id": 1106913, "path": ".>lodash", "dev": false, "optional": false, "bundled": false }]
+    }
+  ],
+  "advisories": {
+    "1106913": {
+      "findings": [{ "version": "4.17.20", "paths": [".>lodash"] }],
+      "metadata": null,
+      "vulnerable_versions": "<4.17.21",
+      "module_name": "lodash",
+      "severity": "high",
+      "github_advisory_id": "GHSA-35jh-r3h4-6jhm",
+      "cves": ["CVE-2021-23337"],
+      "access": "public",
+      "patched_versions": ">=4.17.21",
+      "cvss": { "score": 7.2, "vectorString": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H" },
+      "updated": "2023-11-07T05:04:41.000Z",
+      "recommendation": "Upgrade to version 4.17.21 or later",
+      "cwe": ["CWE-77", "CWE-94"],
+      "found_by": null,
+      "deleted": null,
+      "id": 1106913,
+      "references": "- https://nvd.nist.gov/vuln/detail/CVE-2021-23337",
+      "created": "2021-05-06T16:05:51.000Z",
+      "reported_by": null,
+      "title": "Command Injection in lodash",
+      "npm_advisory_id": null,
+      "overview": "`lodash` versions prior to 4.17.21 are vulnerable to Command Injection via the template function.",
+      "url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm"
+    },
+    "1097496": {
+      "findings": [{ "version": "1.2.5", "paths": [".>minimist", ".>mkdirp>minimist"] }],
+      "metadata": null,
+      "vulnerable_versions": "<1.2.6",
+      "module_name": "minimist",
+      "severity": "critical",
+      "github_advisory_id": "GHSA-xvch-5gv4-984h",
+      "cves": ["CVE-2021-44906"],
+      "access": "public",
+      "patched_versions": ">=1.2.6",
+      "updated": "2023-07-19T20:19:07.000Z",
+      "recommendation": "Upgrade to version 1.2.6 or later",
+      "cwe": ["CWE-1321"],
+      "id": 1097496,
+      "created": "2022-03-18T00:01:09.000Z",
+      "title": "Prototype Pollution in minimist",
+      "overview": "Minimist <=1.2.5 is vulnerable to Prototype Pollution via file index.js.",
+      "url": "https://github.com/advisories/GHSA-xvch-5gv4-984h"
+    },
+    "1091234": {
+      "findings": [{ "version": "0.0.8", "paths": [".>old-thing"] }],
+      "vulnerable_versions": ">=0.0.0",
+      "module_name": "old-thing",
+      "severity": "moderate",
+      "github_advisory_id": "GHSA-aaaa-bbbb-cccc",
+      "cves": [],
+      "patched_versions": "<0.0.0",
+      "id": 1091234,
+      "title": "Unmaintained package with ReDoS",
+      "url": "https://github.com/advisories/GHSA-aaaa-bbbb-cccc"
+    }
+  },
+  "muted": [],
+  "metadata": {
+    "vulnerabilities": { "info": 0, "low": 0, "moderate": 1, "high": 1, "critical": 1 },
+    "dependencies": 42,
+    "devDependencies": 0,
+    "optionalDependencies": 0,
+    "totalDependencies": 42
+  }
+}
