@@ -1,10 +1,12 @@
+// FROZEN COPY of src/core/analyzer/detectors/manifests.ts at 0.2.1 — the legacy analyzer, used only by the golden test.
+// Do not edit; delete once the staged analyzer has shipped for a release.
 import { parse as parseToml } from 'smol-toml';
 import { parse as parseYaml } from 'yaml';
 import ignoreFactory from 'ignore';
-import type { Detector, FactDef } from '../context.js';
-import type { Command, Manifest, WorkspacePackage } from '../../model/project-model.js';
-import { detected, fact } from '../../model/fact.js';
-import { baseName, dirOf } from '../../util/paths.js';
+import type { AnalysisContext, Detector } from '../context.js';
+import type { Command, Manifest, WorkspacePackage } from '../../../../../src/core/model/project-model.js';
+import { detected, fact } from '../../../../../src/core/model/fact.js';
+import { baseName, dirOf } from '../../../../../src/core/util/paths.js';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -30,13 +32,14 @@ function commandPurpose(name: string, cmd: string): Command['purpose'] {
   return 'other';
 }
 
-function parseNpm(text: string, p: string, warn: Warn): Parsed | null {
+async function parseNpm(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   let json: Obj;
   try {
     json = JSON.parse(text) as Obj;
   } catch {
-    warn(`Could not parse ${p} (invalid JSON)`);
+    ctx.warn(`Could not parse ${p} (invalid JSON)`);
     return null;
   }
   const scripts = isObj(json.scripts) ? json.scripts : {};
@@ -66,13 +69,14 @@ function pyReqName(spec: string): string | null {
   return m ? m[1]!.toLowerCase().replace(/_/g, '-') : null;
 }
 
-function parsePyproject(text: string, p: string, warn: Warn): Parsed | null {
+async function parsePyproject(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   let t: Obj;
   try {
     t = parseToml(text) as Obj;
   } catch {
-    warn(`Could not parse ${p} (invalid TOML)`);
+    ctx.warn(`Could not parse ${p} (invalid TOML)`);
     return null;
   }
   const project = isObj(t.project) ? t.project : {};
@@ -122,7 +126,9 @@ function parsePyproject(text: string, p: string, warn: Warn): Parsed | null {
   };
 }
 
-function parseRequirements(text: string, p: string, warn: Warn): Parsed | null {
+async function parseRequirements(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
+  if (text === null) return null;
   const deps: string[] = [];
   for (const line of text.split(/\r?\n/)) {
     const l = line.trim();
@@ -134,18 +140,20 @@ function parseRequirements(text: string, p: string, warn: Warn): Parsed | null {
   return { manifest: { path: p, ecosystem: 'python', dependencies: isDev ? [] : deps, devDependencies: isDev ? deps : [] } };
 }
 
-function parsePipfile(text: string, p: string, warn: Warn): Parsed | null {
+async function parsePipfile(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   try {
     const t = parseToml(text) as Obj;
     return { manifest: { path: p, ecosystem: 'python', dependencies: keys(t.packages).map((k) => k.toLowerCase()), devDependencies: keys(t['dev-packages']).map((k) => k.toLowerCase()) } };
   } catch {
-    warn(`Could not parse ${p}`);
+    ctx.warn(`Could not parse ${p}`);
     return null;
   }
 }
 
-function parseGoMod(text: string, p: string, warn: Warn): Parsed | null {
+async function parseGoMod(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   const mod = /^module\s+(\S+)/m.exec(text)?.[1];
   const deps = new Set<string>();
@@ -158,7 +166,8 @@ function parseGoMod(text: string, p: string, warn: Warn): Parsed | null {
   return { manifest: { path: p, ecosystem: 'go', name: mod, dependencies: [...deps], devDependencies: [] } };
 }
 
-function parseGoWork(text: string, p: string, warn: Warn): Parsed | null {
+async function parseGoWork(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   const members: string[] = [];
   for (const m of text.matchAll(/use\s*\(([\s\S]*?)\)/g)) for (const l of m[1]!.split('\n')) if (l.trim()) members.push(l.trim().replace(/^\.\//, ''));
@@ -166,13 +175,14 @@ function parseGoWork(text: string, p: string, warn: Warn): Parsed | null {
   return { manifest: { path: p, ecosystem: 'go', dependencies: [], devDependencies: [] }, workspaceGlobs: members, workspaceTool: 'go workspace' };
 }
 
-function parseCargo(text: string, p: string, warn: Warn): Parsed | null {
+async function parseCargo(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   let t: Obj;
   try {
     t = parseToml(text) as Obj;
   } catch {
-    warn(`Could not parse ${p} (invalid TOML)`);
+    ctx.warn(`Could not parse ${p} (invalid TOML)`);
     return null;
   }
   const pkg = isObj(t.package) ? t.package : {};
@@ -191,7 +201,8 @@ function parseCargo(text: string, p: string, warn: Warn): Parsed | null {
   };
 }
 
-function parsePom(text: string, p: string, warn: Warn): Parsed | null {
+async function parsePom(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   const noParent = text.replace(/<parent>[\s\S]*?<\/parent>/, '').replace(/<dependencies>[\s\S]*<\/dependencies>/, '').replace(/<build>[\s\S]*<\/build>/, '');
   const name = /<artifactId>([^<]+)<\/artifactId>/.exec(noParent)?.[1];
@@ -211,7 +222,8 @@ function parsePom(text: string, p: string, warn: Warn): Parsed | null {
   };
 }
 
-function parseGradle(text: string, p: string, warn: Warn): Parsed | null {
+async function parseGradle(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   const deps: string[] = [];
   const dev: string[] = [];
@@ -221,7 +233,8 @@ function parseGradle(text: string, p: string, warn: Warn): Parsed | null {
   return { manifest: { path: p, ecosystem: 'gradle', dependencies: deps, devDependencies: dev } };
 }
 
-function parseGradleSettings(text: string, p: string, warn: Warn): Parsed | null {
+async function parseGradleSettings(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   const members: string[] = [];
   for (const m of text.matchAll(/include\s*\(?([^)\n]+)\)?/g)) {
@@ -235,7 +248,8 @@ function parseGradleSettings(text: string, p: string, warn: Warn): Parsed | null
   };
 }
 
-function parseComposer(text: string, p: string, warn: Warn): Parsed | null {
+async function parseComposer(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   try {
     const j = JSON.parse(text) as Obj;
@@ -246,12 +260,13 @@ function parseComposer(text: string, p: string, warn: Warn): Parsed | null {
       commands,
     };
   } catch {
-    warn(`Could not parse ${p} (invalid JSON)`);
+    ctx.warn(`Could not parse ${p} (invalid JSON)`);
     return null;
   }
 }
 
-function parseCsproj(text: string, p: string, warn: Warn): Parsed | null {
+async function parseCsproj(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   const deps = [...text.matchAll(/<PackageReference\s+Include=["']([^"']+)["']/g)].map((m) => m[1]!);
   if (/Sdk=["']Microsoft\.NET\.Sdk\.Web["']/.test(text)) deps.push('Microsoft.AspNetCore.App');
@@ -259,7 +274,8 @@ function parseCsproj(text: string, p: string, warn: Warn): Parsed | null {
   return { manifest: { path: p, ecosystem: 'nuget', name: baseName(p).replace(/\.(cs|fs|vb)proj$/, ''), dependencies: isTest ? [] : deps, devDependencies: isTest ? deps : [] } };
 }
 
-function parseGemfile(text: string, p: string, warn: Warn): Parsed | null {
+async function parseGemfile(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   const deps: string[] = [];
   const dev: string[] = [];
@@ -273,25 +289,28 @@ function parseGemfile(text: string, p: string, warn: Warn): Parsed | null {
   return { manifest: { path: p, ecosystem: 'rubygems', dependencies: deps, devDependencies: dev } };
 }
 
-function parsePubspec(text: string, p: string, warn: Warn): Parsed | null {
+async function parsePubspec(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   try {
     const y = parseYaml(text) as Obj;
     return { manifest: { path: p, ecosystem: 'pub', name: typeof y.name === 'string' ? y.name : undefined, dependencies: keys(y.dependencies), devDependencies: keys(y.dev_dependencies) } };
   } catch {
-    warn(`Could not parse ${p} (invalid YAML)`);
+    ctx.warn(`Could not parse ${p} (invalid YAML)`);
     return null;
   }
 }
 
-function parseMix(text: string, p: string, warn: Warn): Parsed | null {
+async function parseMix(ctx: AnalysisContext, p: string): Promise<Parsed | null> {
+  const text = await ctx.read(p);
   if (!text) return null;
   const deps = [...text.matchAll(/\{\s*:([a-z0-9_]+)\s*,/g)].map((m) => m[1]!);
   const name = /app:\s*:([a-z0-9_]+)/.exec(text)?.[1];
   return { manifest: { path: p, ecosystem: 'hex', name, dependencies: deps, devDependencies: [] } };
 }
 
-function parsePnpmWorkspace(text: string): string[] | undefined {
+async function parsePnpmWorkspace(ctx: AnalysisContext, p: string): Promise<string[] | undefined> {
+  const text = await ctx.read(p);
   if (!text) return undefined;
   try {
     const y = parseYaml(text) as Obj;
@@ -301,10 +320,7 @@ function parsePnpmWorkspace(text: string): string[] | undefined {
   }
 }
 
-type Warn = (message: string) => void;
-type Parser = (text: string, p: string, warn: Warn) => Parsed | null;
-
-const PARSERS: Array<[RegExp, Parser]> = [
+const PARSERS: Array<[RegExp, (ctx: AnalysisContext, p: string) => Promise<Parsed | null>]> = [
   [/(^|\/)package\.json$/, parseNpm],
   [/(^|\/)pyproject\.toml$/, parsePyproject],
   [/(^|\/)requirements[^/]*\.txt$/, parseRequirements],
@@ -322,80 +338,6 @@ const PARSERS: Array<[RegExp, Parser]> = [
   [/(^|\/)mix\.exs$/, parseMix],
 ];
 
-/** Parse result plus the warnings the parser emitted (replayed in order by the detector). */
-interface ManifestFact {
-  r: Parsed | null;
-  w: string[];
-}
-
-/** One fact per parser; the manifest records its own path, so the path is part of the key. */
-const MANIFEST_FACTS: FactDef<ManifestFact>[] = PARSERS.map(([re, parser], i) => ({
-  id: `manifest${i}`,
-  pathKeyed: true,
-  applies: (f) => re.test(f.path),
-  compute(text, rel) {
-    const w: string[] = [];
-    const r = parser(text, rel, (m) => w.push(m));
-    return { r, w };
-  },
-}));
-
-const MAKE_RE = /(^|\/)(Makefile|makefile|justfile)$/;
-const makeTargetsFact: FactDef<string[]> = {
-  id: 'make-targets',
-  applies: (f) => MAKE_RE.test(f.path) && f.path.split('/').length <= 3,
-  compute(text) {
-    const out: string[] = [];
-    if (!text) return out;
-    for (const m of text.matchAll(/^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?!=)/gm)) {
-      const name = m[1]!;
-      if (name === 'PHONY' || name.startsWith('.')) continue;
-      out.push(name);
-    }
-    return out;
-  },
-};
-
-interface RootPackageFact {
-  /** "packageManager" name, if declared. */
-  pm: string | null;
-  description: string | null;
-  /** [path, detail] for "main"/"module"/"bin" entries. */
-  entries: Array<[string, string]>;
-}
-const rootPackageFact: FactDef<RootPackageFact> = {
-  id: 'root-package',
-  applies: (f) => f.path === 'package.json',
-  compute(text) {
-    const out: RootPackageFact = { pm: null, description: null, entries: [] };
-    if (!text) return out;
-    out.pm = /"packageManager"\s*:\s*"([a-z]+)@/.exec(text)?.[1] ?? null;
-    try {
-      const d = (JSON.parse(text) as Obj).description;
-      if (typeof d === 'string' && d.trim()) out.description = d.trim();
-    } catch {
-      /* already warned */
-    }
-    try {
-      const j = JSON.parse(text) as Obj;
-      for (const field of ['main', 'module']) {
-        const v = j[field];
-        if (typeof v === 'string') out.entries.push([v.replace(/^\.\//, ''), `"${field}" field`]);
-      }
-      if (isObj(j.bin)) for (const v of Object.values(j.bin)) if (typeof v === 'string') out.entries.push([v.replace(/^\.\//, ''), '"bin" field']);
-    } catch {
-      /* ignore */
-    }
-    return out;
-  },
-};
-
-const pnpmWorkspaceFact: FactDef<string[] | false> = {
-  id: 'pnpm-workspace',
-  applies: (f) => f.path === 'pnpm-workspace.yaml',
-  compute: (text) => parsePnpmWorkspace(text) ?? false,
-};
-
 /**
  * Dependency names (runtime and dev) declared by a manifest, parsed from `text` with
  * the same parsers the analyzer uses. Null when the file type is not supported or
@@ -406,7 +348,8 @@ export async function manifestDependencyNames(p: string, text: string): Promise<
   if (!parser) return null;
   if (!text.trim()) return new Set();
   let failed = false;
-  const r = parser(text, p, () => (failed = true));
+  const ctx = { read: async () => text, warn: () => (failed = true) } as unknown as AnalysisContext;
+  const r = await parser(ctx, p);
   if (!r || failed) return null;
   return new Set([...r.manifest.dependencies, ...r.manifest.devDependencies]);
 }
@@ -452,17 +395,14 @@ const BUILD_SYSTEMS: Array<[RegExp, string]> = [
 export const manifestsDetector: Detector = {
   id: 'manifests',
   version: 1,
-  facts: [...MANIFEST_FACTS, makeTargetsFact, rootPackageFact, pnpmWorkspaceFact],
   async run(ctx) {
     const { model } = ctx;
     const parsed: Parsed[] = [];
-    for (const [i, [re]] of PARSERS.entries()) {
+    for (const [re, parser] of PARSERS) {
       for (const f of ctx.find(re)) {
         ctx.signal?.throwIfAborted();
-        const v = await ctx.fact(f.path, MANIFEST_FACTS[i]!);
-        if (!v) continue;
-        for (const w of v.w) ctx.warn(w);
-        if (v.r) parsed.push(v.r);
+        const r = await parser(ctx, f.path);
+        if (r) parsed.push(r);
       }
     }
     parsed.sort((a, b) => a.manifest.path.localeCompare(b.manifest.path));
@@ -470,12 +410,16 @@ export const manifestsDetector: Detector = {
     model.commands.push(...parsed.flatMap((p) => p.commands ?? []));
 
     // Makefile / justfile targets
-    for (const f of ctx.find(MAKE_RE)) {
+    for (const f of ctx.find(/(^|\/)(Makefile|makefile|justfile)$/)) {
       if (f.path.split('/').length > 3) continue;
-      const names = await ctx.fact(f.path, makeTargetsFact);
-      if (!names) continue;
+      const text = await ctx.read(f.path);
+      if (!text) continue;
       const isJust = baseName(f.path) === 'justfile';
-      for (const name of names) model.commands.push({ name, command: isJust ? `just ${name}` : `make ${name}`, source: f.path, purpose: commandPurpose(name, '') });
+      for (const m of text.matchAll(/^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?!=)/gm)) {
+        const name = m[1]!;
+        if (name === 'PHONY' || name.startsWith('.')) continue;
+        model.commands.push({ name, command: isJust ? `just ${name}` : `make ${name}`, source: f.path, purpose: commandPurpose(name, '') });
+      }
     }
 
     // Package managers
@@ -487,9 +431,9 @@ export const manifestsDetector: Detector = {
       if (implied && !pm.has(implied)) pm.set(implied, [m.manifest.path]);
     }
     const rootPkg = parsed.find((p) => p.manifest.path === 'package.json');
-    const rootMeta = rootPkg ? await ctx.fact('package.json', rootPackageFact) : null;
-    if (rootMeta) {
-      const declared = rootMeta.pm;
+    if (rootPkg) {
+      const text = await ctx.read('package.json');
+      const declared = text ? /"packageManager"\s*:\s*"([a-z]+)@/.exec(text)?.[1] : undefined;
       if (declared && !pm.has(declared)) pm.set(declared, ['package.json']);
     }
     model.packageManagers = [...pm.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, files]) => ({
@@ -515,7 +459,7 @@ export const manifestsDetector: Detector = {
       }
     }
     if (ctx.has('pnpm-workspace.yaml')) {
-      const g = (await ctx.fact('pnpm-workspace.yaml', pnpmWorkspaceFact)) || undefined;
+      const g = await parsePnpmWorkspace(ctx, 'pnpm-workspace.yaml');
       if (g?.length) {
         globs.push(...g);
         tool = 'pnpm workspaces';
@@ -554,10 +498,28 @@ export const manifestsDetector: Detector = {
 
     const rootManifest = model.manifests.find((m) => dirOf(m.path) === '.' && m.name);
     if (rootManifest?.name) model.name = rootManifest.name;
-    // Root package.json description and FACT-level entry points ("main"/"module"/"bin").
-    if (rootMeta) {
-      if (rootMeta.description) model.description = rootMeta.description;
-      for (const [p, detail] of rootMeta.entries) model.entryPoints.push({ path: p, provenance: fact('config', [{ file: 'package.json', detail }]) });
+    const pkgJson = rootPkg ? await ctx.read('package.json') : null;
+    if (pkgJson) {
+      try {
+        const d = (JSON.parse(pkgJson) as Obj).description;
+        if (typeof d === 'string' && d.trim()) model.description = d.trim();
+      } catch {
+        /* already warned */
+      }
+    }
+
+    // Record root manifest names as FACT-level provenance on entry points where declared.
+    if (pkgJson) {
+      try {
+        const j = JSON.parse(pkgJson) as Obj;
+        for (const field of ['main', 'module']) {
+          const v = j[field];
+          if (typeof v === 'string') model.entryPoints.push({ path: v.replace(/^\.\//, ''), provenance: fact('config', [{ file: 'package.json', detail: `"${field}" field` }]) });
+        }
+        if (isObj(j.bin)) for (const v of Object.values(j.bin)) if (typeof v === 'string') model.entryPoints.push({ path: v.replace(/^\.\//, ''), provenance: fact('config', [{ file: 'package.json', detail: '"bin" field' }]) });
+      } catch {
+        /* ignore */
+      }
     }
   },
 };

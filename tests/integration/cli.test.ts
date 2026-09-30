@@ -42,12 +42,15 @@ describe('athena CLI', () => {
 
     for (const d of KNOWLEDGE_DOCS) await expect(fs.access(path.join(dir, '.athena', d.file))).resolves.toBeUndefined();
     const state = JSON.parse(await read(dir, '.athena/state.json'));
-    expect(state.schemaVersion).toBe(1);
+    expect(state.schemaVersion).toBe(2);
+    expect(state.fileIndex).toBeUndefined();
     expect(state.agents['claude-code'].configured).toBe(true);
     expect(state.agents['cursor']).toBeUndefined();
 
-    // No secret anywhere in .athena/
-    for (const f of await fs.readdir(path.join(dir, '.athena'))) {
+    // No secret anywhere in .athena/ — including the facts cache.
+    const files = (await fs.readdir(path.join(dir, '.athena'), { recursive: true, withFileTypes: true })).filter((e) => e.isFile()).map((e) => path.relative(path.join(dir, '.athena'), path.join(e.parentPath, e.name)));
+    expect(files.some((f) => f.startsWith(path.join('cache', 'v1', 'facts')))).toBe(true);
+    for (const f of files) {
       if (f.startsWith('.backup')) continue;
       const text = await read(dir, `.athena/${f}`);
       expect(text, f).not.toContain(FAKE.stripe);

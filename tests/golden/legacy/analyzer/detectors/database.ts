@@ -1,21 +1,17 @@
-import type { AnalysisContext, Detector, FactDef } from '../context.js';
-import type { DbEntity } from '../../model/project-model.js';
-import { detected } from '../../model/fact.js';
-import { dirOf } from '../../util/paths.js';
+// FROZEN COPY of src/core/analyzer/detectors/database.ts at 0.2.1 — the legacy analyzer, used only by the golden test.
+// Do not edit; delete once the staged analyzer has shipped for a release.
+import type { AnalysisContext, Detector } from '../context.js';
+import type { DbEntity } from '../../../../../src/core/model/project-model.js';
+import { detected } from '../../../../../src/core/model/fact.js';
+import { dirOf } from '../../../../../src/core/util/paths.js';
 
-type EntityFact = Omit<DbEntity, 'file' | 'provenance'> & { line?: number };
-
-interface PrismaFact {
-  provider: string | null;
-  models: EntityFact[];
-}
-const prismaFact: FactDef<PrismaFact | false> = {
-  id: 'db-prisma',
-  applies: (f) => /\.prisma$/.test(f.path),
-  compute(text) {
-    if (!text) return false;
-    const provider = /datasource\s+\w+\s*\{[^}]*provider\s*=\s*"([^"]+)"/.exec(text)?.[1] ?? null;
-    const models: EntityFact[] = [];
+async function prisma(ctx: AnalysisContext): Promise<DbEntity[]> {
+  const out: DbEntity[] = [];
+  for (const f of ctx.find(/\.prisma$/)) {
+    const text = await ctx.read(f.path);
+    if (!text) continue;
+    const provider = /datasource\s+\w+\s*\{[^}]*provider\s*=\s*"([^"]+)"/.exec(text)?.[1];
+    if (provider) ctx.model.databases.push({ name: `${provider} (Prisma datasource)`, kind: 'engine', provenance: detected('config', [{ file: f.path, detail: 'datasource provider' }]) });
     for (const m of text.matchAll(/^(model|view)\s+(\w+)\s*\{([\s\S]*?)^\}/gm)) {
       const body = m[3]!;
       const fields: DbEntity['fields'] = [];
@@ -35,19 +31,9 @@ const prismaFact: FactDef<PrismaFact | false> = {
         const rel = attributes.find((a) => a.startsWith('@relation'));
         if (rel) relations.push(`${fm[1]} → ${fm[2]!.replace(/[[\]?]/g, '')}`);
       }
-      models.push({ name: m[2]!, kind: 'model', fields, indexes, relations, line: text.slice(0, m.index).split('\n').length });
+      const lineNo = text.slice(0, m.index).split('\n').length;
+      out.push({ name: m[2]!, kind: 'model', fields, indexes, relations, file: f.path, provenance: detected('code', [{ file: f.path, line: lineNo }]) });
     }
-    return { provider, models };
-  },
-};
-
-async function prisma(ctx: AnalysisContext): Promise<DbEntity[]> {
-  const out: DbEntity[] = [];
-  for (const f of ctx.find(/\.prisma$/)) {
-    const v = await ctx.fact(f.path, prismaFact);
-    if (!v) continue;
-    if (v.provider) ctx.model.databases.push({ name: `${v.provider} (Prisma datasource)`, kind: 'engine', provenance: detected('config', [{ file: f.path, detail: 'datasource provider' }]) });
-    for (const e of v.models) out.push({ name: e.name, kind: e.kind, fields: e.fields, indexes: e.indexes, relations: e.relations, file: f.path, provenance: detected('code', [{ file: f.path, line: e.line }]) });
   }
   return out;
 }
@@ -56,20 +42,13 @@ function stripSqlComments(sql: string): string {
   return sql.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
-interface SqlFact {
-  /** CREATE TABLE statements, in file order. */
-  tables: Array<{ name: string; fields: DbEntity['fields']; relations: string[]; line?: number }>;
-  /** CREATE INDEX statements: [lower-cased table name, index description]. */
-  indexes: Array<[string, string]>;
-}
-const SQL_RE = /\.sql$/i;
-const sqlFact: FactDef<SqlFact | false> = {
-  id: 'db-sql',
-  applies: (f) => SQL_RE.test(f.path) && !f.large,
-  compute(raw) {
-    if (!raw) return false;
+async function sqlFiles(ctx: AnalysisContext): Promise<DbEntity[]> {
+  const tables = new Map<string, DbEntity>();
+  const files = ctx.find((f) => /\.sql$/i.test(f.path) && !f.large).slice(0, 2000);
+  for (const f of files) {
+    const raw = await ctx.read(f.path);
+    if (!raw) continue;
     const text = stripSqlComments(raw);
-    const out: SqlFact = { tables: [], indexes: [] };
     for (const m of text.matchAll(/CREATE\s+(?:UNLOGGED\s+|TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([`"[\]\w.]+)\s*\(([\s\S]*?)\)\s*;/gi)) {
       const name = m[1]!.replace(/[`"[\]]/g, '');
       const fields: DbEntity['fields'] = [];
@@ -93,28 +72,12 @@ const sqlFact: FactDef<SqlFact | false> = {
         fields.push({ name: cm[1]!.replace(/[`"]/g, ''), type: cm[2]!, attributes: attrs });
       }
       const line = raw.slice(0, raw.indexOf(m[0].slice(0, 20))).split('\n').length;
-      out.tables.push({ name, fields, relations, line: line > 0 ? line : undefined });
+      // Later migrations may redefine a table; keep the latest definition by path order.
+      tables.set(name.toLowerCase(), { name, kind: 'table', fields, indexes: tables.get(name.toLowerCase())?.indexes ?? [], relations, file: f.path, provenance: detected('code', [{ file: f.path, line: line > 0 ? line : undefined }]) });
     }
     for (const m of text.matchAll(/CREATE\s+(UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([`"\w.]+)\s+ON\s+([`"\w.]+)\s*(?:USING\s+\w+\s*)?\(([^)]*)\)/gi)) {
-      out.indexes.push([m[3]!.replace(/[`"]/g, '').toLowerCase(), `${m[1] ? 'UNIQUE ' : ''}${m[2]!.replace(/[`"]/g, '')} (${m[4]!.trim()})`]);
-    }
-    return out;
-  },
-};
-
-async function sqlFiles(ctx: AnalysisContext): Promise<DbEntity[]> {
-  const tables = new Map<string, DbEntity>();
-  const files = ctx.find((f) => SQL_RE.test(f.path) && !f.large).slice(0, 2000);
-  for (const f of files) {
-    const v = await ctx.fact(f.path, sqlFact);
-    if (!v) continue;
-    for (const t of v.tables) {
-      // Later migrations may redefine a table; keep the latest definition by path order.
-      tables.set(t.name.toLowerCase(), { name: t.name, kind: 'table', fields: t.fields, indexes: tables.get(t.name.toLowerCase())?.indexes ?? [], relations: t.relations, file: f.path, provenance: detected('code', [{ file: f.path, line: t.line }]) });
-    }
-    for (const [table, index] of v.indexes) {
-      const t = tables.get(table);
-      if (t) t.indexes.push(index);
+      const t = tables.get(m[3]!.replace(/[`"]/g, '').toLowerCase());
+      if (t) t.indexes.push(`${m[1] ? 'UNIQUE ' : ''}${m[2]!.replace(/[`"]/g, '')} (${m[4]!.trim()})`);
     }
   }
   return [...tables.values()];
@@ -136,13 +99,11 @@ function splitTopLevel(s: string): string[] {
   return parts;
 }
 
-const DJANGO_MODELS_RE = /(^|\/)models(\.py|\/[^/]+\.py)$/;
-const djangoFact: FactDef<EntityFact[]> = {
-  id: 'db-django-models',
-  applies: (f) => DJANGO_MODELS_RE.test(f.path),
-  compute(text) {
-    const out: EntityFact[] = [];
-    if (!text || !/from django\.db import models|models\.Model/.test(text)) return out;
+async function djangoModels(ctx: AnalysisContext): Promise<DbEntity[]> {
+  const out: DbEntity[] = [];
+  for (const f of ctx.find(/(^|\/)models(\.py|\/[^/]+\.py)$/)) {
+    const text = await ctx.read(f.path);
+    if (!text || !/from django\.db import models|models\.Model/.test(text)) continue;
     const classRe = /^class\s+(\w+)\(([^)]*models\.Model[^)]*)\):\s*\n((?:[ \t]+.*\n|\s*\n)*)/gm;
     for (const m of text.matchAll(classRe)) {
       const fields: DbEntity['fields'] = [];
@@ -151,65 +112,37 @@ const djangoFact: FactDef<EntityFact[]> = {
         fields.push({ name: fm[1]!, type: fm[2]!, attributes: [] });
         if (/ForeignKey|OneToOneField|ManyToManyField/.test(fm[2]!)) relations.push(`${fm[1]} → ${fm[3]!.split(',')[0]!.trim().replace(/["']/g, '')}`);
       }
-      out.push({ name: m[1]!, kind: 'model', fields, indexes: [], relations, line: text.slice(0, m.index).split('\n').length });
+      out.push({ name: m[1]!, kind: 'model', fields, indexes: [], relations, file: f.path, provenance: detected('code', [{ file: f.path, line: text.slice(0, m.index).split('\n').length }], 'medium') });
     }
-    return out;
-  },
-};
-
-const entitiesFrom = (file: string, list: EntityFact[] | null): DbEntity[] =>
-  (list ?? []).map((e) => ({ name: e.name, kind: e.kind, fields: e.fields, indexes: e.indexes, relations: e.relations, file, provenance: detected('code', [{ file, line: e.line }], 'medium') }));
-
-async function djangoModels(ctx: AnalysisContext): Promise<DbEntity[]> {
-  const out: DbEntity[] = [];
-  for (const f of ctx.find(DJANGO_MODELS_RE)) out.push(...entitiesFrom(f.path, await ctx.fact(f.path, djangoFact)));
+  }
   return out;
 }
 
-const sqlalchemyFact: FactDef<EntityFact[]> = {
-  id: 'db-sqlalchemy-models',
-  applies: (f) => /\.py$/.test(f.path),
-  compute(text) {
-    const out: EntityFact[] = [];
-    if (!text || !/__tablename__|table=True/.test(text)) return out;
+async function sqlalchemyModels(ctx: AnalysisContext): Promise<DbEntity[]> {
+  const out: DbEntity[] = [];
+  if (!ctx.model.databases.some((d) => /SQLAlchemy|SQLModel/.test(d.name))) return out;
+  for (const f of ctx.find(/\.py$/).slice(0, 5000)) {
+    const text = await ctx.read(f.path);
+    if (!text || !/__tablename__|table=True/.test(text)) continue;
     for (const m of text.matchAll(/^class\s+(\w+)\(([^)]*)\):\s*\n((?:[ \t]+.*\n|\s*\n)*)/gm)) {
       const body = m[3]!;
       const tn = /__tablename__\s*=\s*["'](\w+)["']/.exec(body)?.[1];
       if (!tn && !/table\s*=\s*True/.test(m[2]!)) continue;
       const fields = [...body.matchAll(/^\s+(\w+)\s*(?::\s*[^=\n]+)?=\s*(?:Column|mapped_column|Field)\(/gm)].map((fm) => ({ name: fm[1]!, attributes: [] as string[] }));
-      out.push({ name: tn ?? m[1]!, kind: 'table', fields, indexes: [], relations: [], line: text.slice(0, m.index).split('\n').length });
+      out.push({ name: tn ?? m[1]!, kind: 'table', fields, indexes: [], relations: [], file: f.path, provenance: detected('code', [{ file: f.path, line: text.slice(0, m.index).split('\n').length }], 'medium') });
     }
-    return out;
-  },
-};
-
-async function sqlalchemyModels(ctx: AnalysisContext): Promise<DbEntity[]> {
-  const out: DbEntity[] = [];
-  if (!ctx.model.databases.some((d) => /SQLAlchemy|SQLModel/.test(d.name))) return out;
-  for (const f of ctx.find(/\.py$/).slice(0, 5000)) out.push(...entitiesFrom(f.path, await ctx.fact(f.path, sqlalchemyFact)));
+  }
   return out;
 }
-
-const MONGOOSE_RE = /\.(m|c)?(t|j)s$/;
-const mongooseFact: FactDef<Array<[string, number]>> = {
-  id: 'db-mongoose-models',
-  applies: (f) => MONGOOSE_RE.test(f.path),
-  compute(text) {
-    const out: Array<[string, number]> = [];
-    if (!text || !text.includes('model(')) return out;
-    for (const m of text.matchAll(/mongoose\.model\s*(?:<[^>]*>)?\(\s*["'](\w+)["']|\bmodel\s*(?:<[^>]*>)?\(\s*["'](\w+)["']\s*,/g)) {
-      out.push([(m[1] ?? m[2])!, text.slice(0, m.index).split('\n').length]);
-    }
-    return out;
-  },
-};
 
 async function mongooseModels(ctx: AnalysisContext): Promise<DbEntity[]> {
   if (!ctx.model.databases.some((d) => d.name === 'Mongoose')) return [];
   const out: DbEntity[] = [];
-  for (const f of ctx.find(MONGOOSE_RE).slice(0, 5000)) {
-    for (const [name, line] of (await ctx.fact(f.path, mongooseFact)) ?? []) {
-      out.push({ name, kind: 'collection', fields: [], indexes: [], relations: [], file: f.path, provenance: detected('code', [{ file: f.path, line }], 'medium') });
+  for (const f of ctx.find(/\.(m|c)?(t|j)s$/).slice(0, 5000)) {
+    const text = await ctx.read(f.path);
+    if (!text || !text.includes('model(')) continue;
+    for (const m of text.matchAll(/mongoose\.model\s*(?:<[^>]*>)?\(\s*["'](\w+)["']|\bmodel\s*(?:<[^>]*>)?\(\s*["'](\w+)["']\s*,/g)) {
+      out.push({ name: (m[1] ?? m[2])!, kind: 'collection', fields: [], indexes: [], relations: [], file: f.path, provenance: detected('code', [{ file: f.path, line: text.slice(0, m.index).split('\n').length }], 'medium') });
     }
   }
   return out;
@@ -233,7 +166,6 @@ const MIGRATION_DIRS: Array<[RegExp, string]> = [
 export const databaseDetector: Detector = {
   id: 'database',
   version: 1,
-  facts: [prismaFact, sqlFact, djangoFact, sqlalchemyFact, mongooseFact],
   async run(ctx) {
     const { model } = ctx;
     const entities = [...(await prisma(ctx)), ...(await sqlFiles(ctx)), ...(await djangoModels(ctx)), ...(await sqlalchemyModels(ctx)), ...(await mongooseModels(ctx))];

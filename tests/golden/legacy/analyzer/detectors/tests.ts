@@ -1,5 +1,7 @@
-import type { Detector, FactDef } from '../context.js';
-import { detected } from '../../model/fact.js';
+// FROZEN COPY of src/core/analyzer/detectors/tests.ts at 0.2.1 — the legacy analyzer, used only by the golden test.
+// Do not edit; delete once the staged analyzer has shipped for a release.
+import type { Detector } from '../context.js';
+import { detected } from '../../../../../src/core/model/fact.js';
 
 export const TEST_FILE_RE = /(^|\/)(__tests__|tests?|spec|specs|e2e|integration_tests|androidTest|test_driver)\/|\.(test|spec|e2e)\.[cm]?[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go|exs)$|_spec\.rb$|Tests?\.(java|kt|cs)$|_test\.dart$/;
 const SOURCE_RE = /\.(m|c)?(t|j)sx?$|\.(py|go|rs|java|kt|cs|php|rb|dart|ex|swift|vue|svelte)$/;
@@ -18,24 +20,9 @@ const RUNNER_CONFIGS: Array<[RegExp, string]> = [
 
 const COVERAGE: RegExp = /(^|\/)(\.nycrc(\.json)?|\.coveragerc|codecov\.ya?ml|\.codecov\.ya?ml|jacoco[^/]*\.xml|\.c8rc(\.json)?|coverage\.xml|sonar-project\.properties)$/;
 
-const COVERAGE_CONFIG = /(^|\/)(jest|vitest)\.config\.(js|ts|mjs|cjs)$/;
-
-const rustTestFact: FactDef<boolean> = {
-  id: 'rust-test-attr',
-  applies: (f) => /\.rs$/.test(f.path),
-  compute: (text) => !!text && /#\[(tokio::)?test\]/.test(text),
-};
-
-const coverageFact: FactDef<boolean> = {
-  id: 'runner-coverage',
-  applies: (f) => COVERAGE_CONFIG.test(f.path),
-  compute: (text) => !!text && /coverage/.test(text),
-};
-
 export const testsDetector: Detector = {
   id: 'tests',
   version: 1,
-  facts: [rustTestFact, coverageFact],
   async run(ctx) {
     const { model } = ctx;
     const testFiles = ctx.find((f) => !f.binary && SOURCE_RE.test(f.path) && TEST_FILE_RE.test(f.path));
@@ -60,7 +47,8 @@ export const testsDetector: Detector = {
     if (model.manifests.some((m) => m.ecosystem === 'cargo') && ctx.find(/\.rs$/).length) {
       const withTests: string[] = [];
       for (const f of ctx.find(/\.rs$/).slice(0, 2000)) {
-        if (await ctx.fact(f.path, rustTestFact)) withTests.push(f.path);
+        const t = await ctx.read(f.path);
+        if (t && /#\[(tokio::)?test\]/.test(t)) withTests.push(f.path);
         if (withTests.length >= 3) break;
       }
       if (withTests.length) model.tests.frameworks.push({ name: 'cargo test', provenance: detected('code', withTests.map((file) => ({ file, detail: '#[test] attribute' }))) });
@@ -68,8 +56,9 @@ export const testsDetector: Detector = {
     model.tests.frameworks.sort((a, b) => a.name.localeCompare(b.name));
 
     model.tests.coverageConfigs = ctx.find(COVERAGE).map((f) => f.path);
-    for (const f of ctx.find(COVERAGE_CONFIG)) {
-      if (await ctx.fact(f.path, coverageFact)) model.tests.coverageConfigs.push(f.path);
+    for (const f of ctx.find(/(^|\/)(jest|vitest)\.config\.(js|ts|mjs|cjs)$/)) {
+      const t = await ctx.read(f.path);
+      if (t && /coverage/.test(t)) model.tests.coverageConfigs.push(f.path);
     }
 
     // Structural gap: workspace packages with source files but no test files.

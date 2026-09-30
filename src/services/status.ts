@@ -4,7 +4,7 @@ import { walkProject } from '../core/fs/walker.js';
 import { impactOf } from '../core/impact/impact.js';
 import { KNOWLEDGE_DOCS } from '../core/knowledge/documents.js';
 import { isBlockModified, parseBlocks } from '../core/knowledge/managed-blocks.js';
-import { athenaDir, buildFileIndex, diffFileIndex, readState } from '../core/state/state.js';
+import { athenaDir, buildFileIndex, diffFileIndex, readFileIndex, readState } from '../core/state/state.js';
 import { readTextIfExists } from '../core/util/fs.js';
 import { workingChanges } from '../core/git/git.js';
 import { AthenaError } from './errors.js';
@@ -49,8 +49,9 @@ export async function buildStatus(root: string, signal?: AbortSignal): Promise<S
   }
 
   const { config } = await loadConfig(root);
-  const walk = await walkProject(root, { config, signal, reuse: state.fileIndex });
-  const raw = diffFileIndex(state.fileIndex, buildFileIndex(walk.files));
+  const prevIndex = await readFileIndex(dir);
+  const walk = await walkProject(root, { config, signal, reuse: prevIndex });
+  const raw = diffFileIndex(prevIndex, buildFileIndex(walk.files));
   // Files Athena manages for agent integrations are not developer changes.
   const managed = new Set(Object.values(state.agents).flatMap((a) => a.files));
   const keep = (p: string) => !managed.has(p);
