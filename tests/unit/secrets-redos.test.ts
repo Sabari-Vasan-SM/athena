@@ -1,6 +1,9 @@
 import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
 import { check } from 'recheck';
+
+// Use recheck's pure-JS backend on every OS (its Java fallback fails on Windows CI).
+process.env.RECHECK_BACKEND ??= 'pure';
 import { MAX_GENERIC_LINE, SECRET_PATTERNS, scanText, type ScanStats } from '../../src/core/security/secrets.js';
 import { FAKE } from '../helpers.js';
 

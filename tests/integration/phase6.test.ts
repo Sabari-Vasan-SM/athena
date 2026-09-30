@@ -247,7 +247,10 @@ describe('MCP server', () => {
 describe('AI providers', () => {
   beforeEach(async () => {
     // Never read the developer's real user config, and start without trusted overrides.
-    vi.stubEnv('XDG_CONFIG_HOME', await fs.mkdtemp(path.join((await import('node:os')).tmpdir(), 'athena-xdg-')));
+    // Isolate the user-level config on every platform (Windows reads %APPDATA%, others XDG_CONFIG_HOME).
+    const userHome = await fs.mkdtemp(path.join((await import('node:os')).tmpdir(), 'athena-xdg-'));
+    vi.stubEnv('XDG_CONFIG_HOME', userHome);
+    vi.stubEnv('APPDATA', userHome);
     vi.stubEnv('ATHENA_AI_BASE_URL', '');
     vi.stubEnv('ATHENA_AI_CONSENT', '');
     vi.stubEnv('OLLAMA_HOST', '');
@@ -311,7 +314,10 @@ describe('AI providers', () => {
 
 describe('AI trust boundary', () => {
   beforeEach(async () => {
-    vi.stubEnv('XDG_CONFIG_HOME', await fs.mkdtemp(path.join((await import('node:os')).tmpdir(), 'athena-xdg-')));
+    // Isolate the user-level config on every platform (Windows reads %APPDATA%, others XDG_CONFIG_HOME).
+    const userHome = await fs.mkdtemp(path.join((await import('node:os')).tmpdir(), 'athena-xdg-'));
+    vi.stubEnv('XDG_CONFIG_HOME', userHome);
+    vi.stubEnv('APPDATA', userHome);
     vi.stubEnv('ATHENA_AI_BASE_URL', '');
     vi.stubEnv('ATHENA_AI_CONSENT', '');
     vi.stubEnv('OLLAMA_HOST', '');
