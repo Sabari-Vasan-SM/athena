@@ -17,6 +17,12 @@ interface LiveState {
 
 const Ctx = createContext<LiveState | null>(null);
 
+/** Events after which data on disk may have changed, so pages should refetch. */
+const REFRESHING_EVENT = /^(knowledge|analysis\.completed|rules|agents|sync|git|security|graph)(\.|$)/;
+export function bumpsRevision(type: string): boolean {
+  return REFRESHING_EVENT.test(type);
+}
+
 const IDLE: Activity = { state: 'IDLE', actor: 'none', task: null, reading: [], since: new Date().toISOString() };
 
 export function LiveProvider({ children }: { children: ReactNode }) {
@@ -52,7 +58,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         if (type === 'event') {
           const e = data as AthenaEvent;
           setEvents((prev) => (prev.some((p) => p.id === e.id) ? prev : [...prev, e].slice(-500)));
-          if (/^(knowledge|analysis\.completed|rules|agents|sync|git)/.test(e.type)) {
+          if (bumpsRevision(e.type)) {
             setRevision((r) => r + 1);
             refreshDocs();
           }

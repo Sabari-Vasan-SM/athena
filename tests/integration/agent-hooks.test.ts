@@ -1,11 +1,14 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import os from 'node:os';
+import { cmdQuote, hookScript, shQuote } from '../../src/agents/common/hooks.js';
 import { createServer } from '../../src/server/app.js';
 import { runPipeline } from '../../src/services/pipeline.js';
 import { listAgents } from '../../src/services/agents.js';
-import { readRecentEvents, summarizeSessions } from '../../src/services/agent-activity.js';
+import { activityFile, appendEvent, readRecentEvents, redactCommandSecrets, rotatedActivityFile, rotateIfNeeded, sanitizeEvent, summarizeSessions } from '../../src/services/agent-activity.js';
+import type { AgentEvent } from '../../src/agents/common/hook-events.js';
 import { normalizeHookEvent } from '../../src/agents/common/hook-events.js';
 import { claudeCodeAdapter } from '../../src/agents/claude-code/adapter.js';
 import { cursorAdapter } from '../../src/agents/cursor/adapter.js';
@@ -511,4 +514,114 @@ describe('server agent activity', () => {
       await s.close();
     }
   }, 30_000);
+});
+
+describe('hook script quoting', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const nasty = ['/opt/my tools/athena', "/opt/it's/athena", '/opt/$HOME/athena', '/opt/a&b/athena', '/opt/`id`;x/athena'];
+
+  it('quotes the command and agent for POSIX sh so they run as one literal word', async () => {
+    if (process.platform === 'win32') return;
+    for (const name of ['my tools', "it's", '$HOME', 'a&b', '`id`;x', 'x|y>z']) {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'athena-quote-'));
+      const binDir = path.join(dir, name);
+      await fs.mkdir(binDir, { recursive: true });
+      const out = path.join(dir, 'args.txt');
+      const shim = path.join(binDir, 'athena');
+      await fs.writeFile(shim, `#!/bin/sh\nprintf '%s\\n' "$@" > '${out.replace(/'/g, `'\\''`)}'\n`, { mode: 0o755 });
+      vi.stubEnv('ATHENA_HOOK_COMMAND', shim);
+      const script = hookScript("cur'sor $x", 'linux');
+      const scriptFile = path.join(dir, script.file);
+      await fs.writeFile(scriptFile, script.content, { mode: 0o755 });
+      await new Promise<void>((resolve, reject) => execFile('/bin/sh', [scriptFile, 'after edit'], { cwd: dir }, (err) => (err ? reject(err) : resolve())));
+      expect((await fs.readFile(out, 'utf8')).split('\n').filter(Boolean), name).toEqual(['event', '--athena-hook', '--agent', "cur'sor $x", '--hook', 'after edit']);
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves plain words unquoted and escapes the rest', () => {
+    expect(shQuote('athena')).toBe('athena');
+    expect(shQuote('/usr/local/bin/athena')).toBe('/usr/local/bin/athena');
+    for (const v of nasty) {
+      const q = shQuote(v);
+      expect(q.startsWith("'") && q.endsWith("'"), v).toBe(true);
+    }
+    expect(shQuote("it's")).toBe(`'it'\\''s'`);
+  });
+
+  it('quotes for cmd.exe: double quotes, doubled %, refuses embedded quotes', () => {
+    expect(cmdQuote('athena')).toBe('athena');
+    expect(cmdQuote('C:\\tools\\athena.cmd')).toBe('C:\\tools\\athena.cmd');
+    expect(cmdQuote('C:\\Program Files\\athena.cmd')).toBe('"C:\\Program Files\\athena.cmd"');
+    expect(cmdQuote('C:\\a&b\\athena.cmd')).toBe('"C:\\a&b\\athena.cmd"');
+    expect(cmdQuote('C:\\100%\\athena')).toBe('"C:\\100%%\\athena"');
+    expect(cmdQuote('C:\\$x\\athena')).toBe('"C:\\$x\\athena"');
+    expect(() => cmdQuote('C:\\a"b')).toThrow(/cannot be quoted/);
+
+    vi.stubEnv('ATHENA_HOOK_COMMAND', 'C:\\My Tools & Co\\athena.cmd');
+    const line = hookScript('cursor', 'win32').content.split('\r\n')[2]!;
+    expect(line).toBe('"C:\\My Tools & Co\\athena.cmd" event --athena-hook --agent cursor --hook "%~1"');
+  });
+});
+
+describe('agent activity log hygiene', () => {
+  const ev = (i: number, extra: Partial<AgentEvent> = {}): AgentEvent => ({ id: `e${i}`, ts: new Date(1_700_000_000_000 + i * 1000).toISOString(), agent: 'claude-code', session: 's', hook: 'PostToolUse', kind: 'tool', state: 'CODING', message: `event ${i}`, files: [], command: null, tool: 'Bash', ...extra } as AgentEvent);
+
+  it('masks credentials in commands and messages', () => {
+    const cases: Array<[string, string]> = [
+      ['curl -H "Authorization: Bearer abc123token" https://api.example', 'abc123token'],
+      ["curl -H 'authorization: Basic dXNlcjpwYXNz' x", 'dXNlcjpwYXNz'],
+      ['psql --password=hunter2 -h db', 'hunter2'],
+      ['deploy --password hunter2 --host x', 'hunter2'],
+      ['deploy --passwd "two words" --host x', 'two words'],
+      ['mysql -u root -phunter2 shop', 'hunter2'],
+      ['mysqldump -uroot -p"s3cr et" shop', 's3cr et'],
+      ['git clone https://alice:hunter2@github.com/acme/repo.git', 'hunter2'],
+      ['psql postgres://app:pa55word@localhost:5432/db', 'pa55word'],
+    ];
+    for (const [input, secret] of cases) {
+      const out = redactCommandSecrets(input);
+      expect(out, input).not.toContain(secret);
+      expect(out, input).toContain('<redacted>');
+    }
+    // Harmless look-alikes stay readable.
+    expect(redactCommandSecrets('ls -p src && echo https://example.com/a')).toBe('ls -p src && echo https://example.com/a');
+    expect(redactCommandSecrets('mysql -u root -p shop')).toBe('mysql -u root -p shop');
+
+    const clean = sanitizeEvent('/proj', ev(1, { command: 'mysql -proot123 db', message: 'Ran curl -H "Authorization: Bearer tok_abcdef" x' }));
+    expect(clean.command).not.toContain('root123');
+    expect(clean.message).not.toContain('tok_abcdef');
+  });
+
+  it('rotates by rename, keeps one generation, and reads both for recent events', async () => {
+    const dir = await project();
+    const file = activityFile(dir);
+    for (let i = 0; i < 10; i++) await appendEvent(dir, ev(i));
+    const before = await fs.readFile(file, 'utf8');
+    await rotateIfNeeded(file, 100);
+    // The old file was renamed intact, not rewritten.
+    expect(await fs.readFile(rotatedActivityFile(dir), 'utf8')).toBe(before);
+    await expect(fs.access(file)).rejects.toThrow();
+    for (let i = 10; i < 13; i++) await appendEvent(dir, ev(i));
+    expect((await readRecentEvents(dir, 5)).map((e) => e.id)).toEqual(['e8', 'e9', 'e10', 'e11', 'e12']);
+    expect((await readRecentEvents(dir, 2)).map((e) => e.id)).toEqual(['e11', 'e12']);
+
+    // A second rotation replaces the old generation (only one is kept).
+    await rotateIfNeeded(file, 100);
+    expect((await readRecentEvents(dir, 100)).map((e) => e.id)).toEqual(['e10', 'e11', 'e12']);
+    const names = await fs.readdir(path.dirname(file));
+    expect(names.filter((n) => n.startsWith('.agent-events'))).toEqual(['.agent-events.1.jsonl']);
+  });
+
+  it('loses no events when appends race with rotation', async () => {
+    const dir = await project();
+    const file = activityFile(dir);
+    await Promise.all(Array.from({ length: 60 }, (_, i) => appendEvent(dir, ev(i)).then(() => rotateIfNeeded(file, 2000))));
+    const all = await readRecentEvents(dir, 1000);
+    // Everything written since the last rotation, plus the generation before it, is intact and parseable.
+    const cur = await fs.readFile(file, 'utf8').catch(() => '');
+    for (const line of cur.split('\n').filter(Boolean)) expect(() => JSON.parse(line)).not.toThrow();
+    expect(new Set(all.map((e) => e.id)).size).toBe(all.length);
+    expect(all.length).toBeGreaterThan(0);
+  });
 });

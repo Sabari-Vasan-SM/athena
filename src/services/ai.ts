@@ -1,31 +1,149 @@
+import os from 'node:os';
 import path from 'node:path';
+import { z } from 'zod';
 import { loadConfig } from '../core/config.js';
+import { readLocalConfig } from '../core/local-config.js';
 import { KNOWLEDGE_DOCS } from '../core/knowledge/documents.js';
 import { redact, scanText } from '../core/security/secrets.js';
 import { athenaDir } from '../core/state/state.js';
 import { readTextIfExists, writeFileAtomic } from '../core/util/fs.js';
 import { AiConfig, AiError, type AIProvider, type Availability } from '../ai/provider.js';
-import { getProvider, PROVIDERS } from '../ai/providers.js';
+import { getProvider, isRemote, PROVIDERS } from '../ai/providers.js';
 import { AthenaError } from './errors.js';
 
 export const SUGGESTIONS_FILE = 'ai-suggestions.md';
+
+export type TrustedSource = 'env' | 'local' | 'user';
 
 export interface AiStatus {
   configured: AiConfig;
   providers: Array<{ id: string; name: string; remote: boolean; defaultModel: string; keyEnvVar?: string; availability: Availability; selected: boolean }>;
   consent: boolean;
+  /** Where consent was granted, when it was. */
+  consentSource?: TrustedSource;
+  /** Settings Athena ignored, and how to fix them. */
+  warnings: string[];
+}
+
+const TrustedAi = z.object({ baseUrl: z.string().optional(), consent: z.boolean().optional() });
+
+/**
+ * The user-level config file: `$XDG_CONFIG_HOME/athena/config.json` (default
+ * `~/.config/athena/config.json`), or `%APPDATA%\athena\config.json` on Windows.
+ */
+export function userConfigPath(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') {
+    const base = env.APPDATA?.trim() || path.join(os.homedir(), 'AppData', 'Roaming');
+    return path.win32.join(base, 'athena', 'config.json');
+  }
+  const base = env.XDG_CONFIG_HOME?.trim() || path.join(os.homedir(), '.config');
+  return path.join(base, 'athena', 'config.json');
+}
+
+async function readUserAi(): Promise<z.infer<typeof TrustedAi>> {
+  const text = await readTextIfExists(userConfigPath()).catch(() => null);
+  if (!text) return {};
+  try {
+    const parsed = TrustedAi.safeParse((JSON.parse(text) as { ai?: unknown })?.ai ?? {});
+    return parsed.success ? parsed.data : {};
+  } catch {
+    return {};
+  }
+}
+
+function envConsent(): boolean | undefined {
+  const v = process.env.ATHENA_AI_CONSENT?.trim().toLowerCase();
+  if (!v) return undefined;
+  if (v === '1' || v === 'true') return true;
+  if (v === '0' || v === 'false') return false;
+  return undefined;
+}
+
+function validBaseUrl(raw: string | undefined): string | undefined {
+  const v = raw?.trim();
+  if (!v) return undefined;
+  try {
+    const u = new URL(v);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? v.replace(/\/+$/, '') : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export const MOVE_AI_HINT =
+  'Set ATHENA_AI_BASE_URL / ATHENA_AI_CONSENT=1, or put them under "ai" in .athena/local.json (gitignored) or ~/.config/athena/config.json.';
+
+/** Warning when the committed config tries to set where data goes, or to grant consent. */
+export async function committedAiWarning(root: string): Promise<string | undefined> {
+  const { config } = await loadConfig(root);
+  const ignored = [config.ai?.baseUrl !== undefined ? 'ai.baseUrl' : '', config.ai?.consent !== undefined ? 'ai.consent' : ''].filter(Boolean);
+  if (!ignored.length) return undefined;
+  return `Ignoring ${ignored.join(' and ')} in .athena/config.json: that file is committed, so anyone who can push to the repository could redirect your API key and knowledge. ${MOVE_AI_HINT}`;
+}
+
+export interface ResolvedAiConfig {
+  config: AiConfig;
+  consentSource?: TrustedSource;
+  warnings: string[];
+}
+
+/**
+ * AI settings. Provider, model, mode and maxChars may come from the committed
+ * `.athena/config.json`; `baseUrl` and `consent` decide where the API key and project
+ * knowledge are sent, so they are only honoured from machine-local sources:
+ * environment (ATHENA_AI_BASE_URL, ATHENA_AI_CONSENT) > .athena/local.json > user config.
+ */
+export async function resolveAiConfig(root: string): Promise<ResolvedAiConfig> {
+  const { config } = await loadConfig(root);
+  const warnings: string[] = [];
+  const committedWarning = await committedAiWarning(root);
+  if (committedWarning) warnings.push(committedWarning);
+  const { baseUrl: _ignoredUrl, consent: _ignoredConsent, ...committed } = config.ai ?? {};
+
+  const local = (await readLocalConfig(root)).ai ?? {};
+  const user = await readUserAi();
+
+  let baseUrl: string | undefined;
+  let baseUrlSource: TrustedSource | undefined;
+  const candidates: Array<[TrustedSource, string | undefined, string]> = [
+    ['env', process.env.ATHENA_AI_BASE_URL, 'ATHENA_AI_BASE_URL'],
+    ['local', local.baseUrl, '.athena/local.json'],
+    ['user', user.baseUrl, userConfigPath()],
+  ];
+  for (const [source, raw, where] of candidates) {
+    if (!raw?.trim()) continue;
+    const url = validBaseUrl(raw);
+    if (!url) {
+      warnings.push(`Ignoring the AI base URL from ${where}: it must be an http(s) URL.`);
+      continue;
+    }
+    baseUrl = url;
+    baseUrlSource = source;
+    break;
+  }
+
+  let consent = false;
+  let consentSource: TrustedSource | undefined;
+  for (const [source, value] of [['env', envConsent()], ['local', local.consent], ['user', user.consent]] as Array<[TrustedSource, boolean | undefined]>) {
+    if (value === undefined) continue;
+    consent = value;
+    consentSource = value ? source : undefined;
+    break;
+  }
+
+  const cfg = AiConfig.parse({ ...committed, consent, ...(baseUrl ? { baseUrl, baseUrlSource } : {}) });
+  return { config: cfg, consentSource, warnings };
 }
 
 export async function aiConfig(root: string): Promise<AiConfig> {
-  const { config } = await loadConfig(root);
-  return AiConfig.parse(config.ai ?? {});
+  return (await resolveAiConfig(root)).config;
 }
 
 export async function aiStatus(root: string): Promise<AiStatus> {
-  const cfg = await aiConfig(root);
+  const { config: cfg, consentSource, warnings } = await resolveAiConfig(root);
   const providers = [];
-  for (const p of PROVIDERS) providers.push({ id: p.id, name: p.name, remote: p.remote, defaultModel: p.defaultModel, keyEnvVar: p.keyEnvVar, availability: await p.available(cfg), selected: p.id === cfg.provider });
-  return { configured: cfg, providers, consent: cfg.consent };
+  for (const p of PROVIDERS) providers.push({ id: p.id, name: p.name, remote: isRemote(p, cfg), defaultModel: p.defaultModel, keyEnvVar: p.keyEnvVar, availability: await p.available(cfg), selected: p.id === cfg.provider });
+  return { configured: cfg, providers, consent: cfg.consent, consentSource, warnings };
 }
 
 export interface EnrichPayload {
@@ -37,6 +155,8 @@ export interface EnrichPayload {
   endpoint: string;
   remote: boolean;
   model: string;
+  /** Settings that were ignored (e.g. an untrusted baseUrl in the committed config). */
+  warnings: string[];
 }
 
 /**
@@ -44,7 +164,7 @@ export interface EnrichPayload {
  * passed through the secret redactor, and capped by config.
  */
 export async function buildEnrichPayload(root: string, opts: { docs?: string[] } = {}): Promise<EnrichPayload> {
-  const cfg = await aiConfig(root);
+  const { config: cfg, warnings } = await resolveAiConfig(root);
   const provider = getProvider(cfg.provider);
   const wanted = opts.docs?.length ? opts.docs : ['project', 'architecture', 'database', 'api'];
   const parts: string[] = [];
@@ -66,7 +186,7 @@ export async function buildEnrichPayload(root: string, opts: { docs?: string[] }
   if (leftover.length) throw new AthenaError('Refusing to send: the knowledge still contains values that look like secrets.', 'Fix them in .athena/*.md first.');
 
   const availability = await provider.available(cfg);
-  return { content, chars: content.length, documents: included, provider, endpoint: availability.endpoint, remote: provider.remote, model: cfg.model ?? provider.defaultModel };
+  return { content, chars: content.length, documents: included, provider, endpoint: availability.endpoint, remote: isRemote(provider, cfg), model: cfg.model ?? provider.defaultModel, warnings };
 }
 
 const SYSTEM = [
@@ -99,7 +219,7 @@ export async function enrich(root: string, opts: { docs?: string[]; consent?: bo
   if (payload.remote && !cfg.consent && !opts.consent) {
     throw new AthenaError(
       `Sending project knowledge to ${payload.endpoint} requires consent.`,
-      'Re-run with --consent, or set "ai": { "consent": true } in .athena/config.json. Use the ollama provider to keep everything local.',
+      'Re-run with `athena ai enrich --consent`, set ATHENA_AI_CONSENT=1, or set "ai": { "consent": true } in .athena/local.json (machine-local, gitignored). Use a local Ollama to keep everything on this machine.',
     );
   }
 

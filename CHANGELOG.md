@@ -2,8 +2,20 @@
 
 ## Unreleased
 
+### Breaking
+
+- `athena review --base <ref>` exits with code 2 when the base can't be resolved or has no merge base with HEAD. Shallow CI clones need full history, e.g. `actions/checkout` with `fetch-depth: 0`.
+- `ai.baseUrl` and `ai.consent` in the committed `.athena/config.json` are now ignored (with a warning in `athena ai status`, `athena ai enrich` and `athena doctor`). Move them to the environment (`ATHENA_AI_BASE_URL`, `ATHENA_AI_CONSENT=1`), `.athena/local.json` (gitignored), or your user config (`~/.config/athena/config.json`, `$XDG_CONFIG_HOME/athena/config.json`, or `%APPDATA%\athena\config.json` on Windows). `provider`, `model`, `mode` and `maxChars` still work from `.athena/config.json`.
+
 ### Security
 
+- **AI credential exfiltration**: a repository could set its own `ai.baseUrl` and `ai.consent` in `.athena/config.json` and receive your API key and knowledge. Both are now read only from machine-local sources (env > `.athena/local.json` > user config), providers refuse a base URL without a trusted source, and an Ollama endpoint that isn't loopback counts as remote and needs consent.
+- **Local server**: per-client rate limiting on `/api/*` (token bucket, 30 req/s, burst 120, 429 when exceeded); `--allow-remote` keeps the Host/Origin allowlist (bind address plus loopback) instead of disabling it, and warns that the connection is plain HTTP; `/api/context` clamps `maxChars` to 200,000; a failed security-scan start (e.g. missing `model.json`) no longer leaves every later scan stuck at 423; shutdown no longer hangs on open event streams.
+- **MCP**: every tool that returns repository content redacts secret-looking values and wraps the text in `<athena-document path="…" trust="untrusted-data">` delimiters with a note that it is project data, not instructions (embedded delimiters are neutralized).
+- **Agent hooks**: generated hook scripts quote `ATHENA_HOOK_COMMAND`, the agent name and the hook argument (POSIX single quotes; cmd.exe double quotes with `%` doubled), so paths with spaces, quotes, `$` or `&` can't break or inject into the script.
+- **Agent activity log**: commands and messages are additionally masked for `Authorization: Bearer|Basic …`, `--password …`, `mysql -p…` and `scheme://user:password@` credentials; rotation renames the log to `.agent-events.1.jsonl` (one generation kept) instead of rewriting it, so concurrent appends are never lost, and recent-event reads include the previous generation.
+- **GitHub Action**: the PR comment is only updated when it was written by `github-actions[bot]` and carries the versioned `<!-- athena-review:v1 -->` marker (the old marker is still recognized from the same bot), so another user's comment can't be hijacked. Review findings now also produce `::error`/`::warning` file annotations (with line numbers where available, escaped, never secret values).
+- **Web UI**: the Security and graph views refresh after `security.*` and `graph.*` events.
 - `athena review` scans each run of consecutive added lines as one block, so multi-line secrets such as PEM private keys are now flagged (at the line where they start, never with the value).
 - `athena review` fails closed on Git errors: a failing `git` command, an unknown `--base`, or a missing merge base (shallow clone) is now an error (exit 2) instead of an empty, "clean" review. Ctrl+C stops running `git` processes.
 - The diff is streamed with a 64 MB budget; a larger diff fails the review instead of being silently truncated.
@@ -11,10 +23,6 @@
 - The dependency check uses the analyzer's manifest parsers (`name =` / `version =` are no longer reported as dependencies), and a new manifest reports all of its dependencies.
 - New `athena review --staged` reviews the index (contents read from Git, untracked files ignored). The `--review` pre-commit hook now runs `athena review --staged --no-sync`, so unstaged or untracked files (such as a local `.env`) no longer block commits while staged secrets still do, and a review that can't run blocks the commit with its own message. Re-run `athena git-hook install --review` to update an installed hook.
 - Untracked files are read once, never through a symlink that points outside the project, and only up to 512 KB. Files that could not be checked are listed in a `skipped` warning (JSON: `incomplete`, `skipped`), and the review no longer says it found nothing to flag.
-
-### Breaking
-
-- `athena review --base <ref>` exits with code 2 when the base can't be resolved or has no merge base with HEAD. Shallow CI clones need full history, e.g. `actions/checkout` with `fetch-depth: 0`.
 
 ## 0.2.0 — 2026-09-26
 

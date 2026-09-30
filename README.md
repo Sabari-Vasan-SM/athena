@@ -246,7 +246,7 @@ Documents to read
 
 **MCP.** `athena mcp` serves this to any MCP-capable agent over stdio, and `athena agents add` registers it (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor, `[mcp_servers.athena]` in `.codex/config.toml` for Codex, `servers.athena` in `.vscode/mcp.json` for GitHub Copilot in VS Code, `mcpServers.athena` in `.gemini/settings.json` for Gemini CLI). Tools: `get_relevant_context`, `get_project_context`, `get_architecture`, `get_database_schema`, `get_api_context`, `get_security_context`, `get_project_rules`, `get_knowledge_document`, `get_project_changes`, `get_project_graph`, `get_athena_status`, `update_knowledge`.
 
-The server is **read-only by default**: `update_knowledge` reports what would change and refuses to write unless you start it with `--allow-write`.
+The server is **read-only by default**: `update_knowledge` reports what would change and refuses to write unless you start it with `--allow-write`. Repository content it returns is passed through the secret redactor and wrapped in `<athena-document … trust="untrusted-data">` delimiters, so agents can tell project data from instructions.
 
 ## Optional AI
 
@@ -258,8 +258,9 @@ athena ai enrich --dry-run        # show exactly what would be sent
 athena ai enrich --consent        # ask for suggestions
 ```
 
-- **Providers:** Anthropic, OpenAI, Google, and Ollama for a fully local setup. Configure in `.athena/config.json` under `"ai"`; API keys come from environment variables only and are never written to disk by Athena.
-- **Consent first.** Nothing leaves your machine without `--consent` (or `"consent": true`). `--dry-run` prints the provider, endpoint, documents and exact size first.
+- **Providers:** Anthropic, OpenAI, Google, and Ollama for a fully local setup. Choose `provider`, `model` and `maxChars` in `.athena/config.json` under `"ai"`; API keys come from environment variables only and are never written to disk by Athena.
+- **Trusted settings stay on your machine.** `.athena/config.json` is committed, so anyone who can push to the repository controls it. The two settings that decide where your API key and knowledge go — `baseUrl` (a custom endpoint or remote Ollama) and `consent` — are therefore only read from machine-local sources, in this order: environment variables `ATHENA_AI_BASE_URL` and `ATHENA_AI_CONSENT=1`; `.athena/local.json` (gitignored), e.g. `{ "ai": { "baseUrl": "https://proxy.internal", "consent": true } }`; your user config at `~/.config/athena/config.json` (`$XDG_CONFIG_HOME/athena/config.json`, or `%APPDATA%\athena\config.json` on Windows) with the same `"ai"` shape. If `.athena/config.json` sets them, Athena ignores them and says so in `athena ai status`, `athena ai enrich` and `athena doctor`.
+- **Consent first.** Nothing leaves your machine without consent: `athena ai enrich --consent`, `ATHENA_AI_CONSENT=1`, or `"consent": true` in `.athena/local.json` or your user config. An Ollama endpoint that isn't `localhost`/`127.0.0.1`/`::1` counts as remote and needs consent too. `--dry-run` prints the provider, endpoint, documents and exact size first.
 - **Knowledge only, redacted.** Athena sends your `.athena` documents — never source code — after the secret redactor, and refuses to send anything that still looks like a secret.
 - **Output is INFERRED.** Suggestions land in `.athena/ai-suggestions.md` (gitignored), clearly labeled and attributed to the model. Nothing is added to your knowledge base automatically.
 

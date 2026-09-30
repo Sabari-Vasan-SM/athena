@@ -2,7 +2,8 @@ import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createServer, type AthenaServer } from '../../src/server/app.js';
+import { clampContextChars, createServer, MAX_CONTEXT_CHARS, type AthenaServer } from '../../src/server/app.js';
+import { allowedHostsFor, makeRateLimiter } from '../../src/server/security.js';
 import { findAvailablePort } from '../../src/server/port.js';
 import { findRunningInstance, startServer } from '../../src/server/instance.js';
 import { runPipeline } from '../../src/services/pipeline.js';
@@ -341,4 +342,84 @@ describe('sync API', () => {
       await s.close();
     }
   }, 30_000);
+});
+
+describe('server hardening', () => {
+  it('rate-limits /api/* per client with a token bucket', async () => {
+    const s = await createServer({ root, token: TOKEN, host: '127.0.0.1', port: PORT, webDir, rateLimit: { perSecond: 1, burst: 3 } });
+    try {
+      const codes = [];
+      for (let i = 0; i < 5; i++) codes.push((await s.app.inject({ url: '/api/health', headers: { host: HOST } })).statusCode);
+      expect(codes).toEqual([200, 200, 200, 429, 429]);
+      // Unauthenticated guessing is limited too, and static assets are not.
+      expect((await s.app.inject({ url: '/api/overview', headers: { host: HOST, authorization: 'Bearer guess' } })).statusCode).toBe(429);
+      expect((await s.app.inject({ url: '/', headers: { host: HOST } })).statusCode).toBe(200);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('refills the bucket over time and keys by client', () => {
+    let t = 0;
+    const take = makeRateLimiter({ perSecond: 2, burst: 2 }, () => t);
+    expect([take('a'), take('a'), take('a')]).toEqual([true, true, false]);
+    expect(take('b')).toBe(true);
+    t = 500;
+    expect([take('a'), take('a')]).toEqual([true, false]);
+  });
+
+  it('keeps the Host allowlist with --allow-remote', async () => {
+    const s = await createServer({ root, token: TOKEN, host: '192.168.7.50', port: PORT, webDir, allowRemote: true });
+    try {
+      const ok = await s.app.inject({ url: '/api/overview', headers: { authorization: `Bearer ${TOKEN}`, host: `192.168.7.50:${PORT}` } });
+      expect(ok.statusCode).toBe(200);
+      expect((await s.app.inject({ url: '/api/health', headers: { host: `localhost:${PORT}` } })).statusCode).toBe(200);
+      expect((await s.app.inject({ url: '/api/overview', headers: { authorization: `Bearer ${TOKEN}`, host: `evil.example:${PORT}` } })).statusCode).toBe(421);
+      const cross = await s.app.inject({ method: 'POST', url: '/api/rules', headers: { authorization: `Bearer ${TOKEN}`, host: `192.168.7.50:${PORT}`, origin: 'http://evil.example', 'content-type': 'application/json' }, payload: { section: 'X', text: 'y' } });
+      expect(cross.statusCode).toBe(403);
+    } finally {
+      await s.close();
+    }
+    const wildcard = allowedHostsFor('0.0.0.0', 80, { remote: true });
+    expect(wildcard.has('127.0.0.1:80')).toBe(true);
+    expect(wildcard.has('evil.example:80')).toBe(false);
+  });
+
+  it('clamps /api/context maxChars server-side', async () => {
+    expect(clampContextChars('999999999')).toBe(MAX_CONTEXT_CHARS);
+    expect(clampContextChars('1e308')).toBe(MAX_CONTEXT_CHARS);
+    expect(clampContextChars('10')).toBe(500);
+    expect(clampContextChars('abc')).toBeUndefined();
+    expect(clampContextChars(undefined)).toBeUndefined();
+    const r = await server.app.inject({ url: '/api/context?task=add%20an%20endpoint&maxChars=999999999', headers: auth });
+    expect(r.statusCode).toBe(200);
+  });
+
+  it('does not leave a security scan stuck when model.json is missing', async () => {
+    const dir = await project();
+    await fs.rm(path.join(dir, '.athena/model.json'), { force: true });
+    const s = await createServer({ root: dir, token: TOKEN, host: '127.0.0.1', port: PORT, webDir });
+    try {
+      const post = () => s.app.inject({ method: 'POST', url: '/api/security/scan', headers: { ...auth, 'content-type': 'application/json' }, payload: { skipAudit: true } });
+      const first = await post();
+      expect(first.statusCode).not.toBe(202);
+      expect(first.json().error).toMatch(/model\.json/);
+      const second = await post();
+      expect(second.statusCode).not.toBe(423);
+      expect((await s.app.inject({ url: '/api/security', headers: auth })).json().running).toBe(false);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('closes promptly with an open SSE connection', async () => {
+    const running = await startServer({ root: await project(), webDir, watch: false });
+    const res = await fetch(`http://127.0.0.1:${running.info.port}/api/events`, { headers: { authorization: `Bearer ${running.info.token}` } });
+    const reader = res.body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain('event: activity');
+    const started = Date.now();
+    await Promise.race([running.close(), new Promise((_, reject) => setTimeout(() => reject(new Error('close() hung')), 3000))]);
+    expect(Date.now() - started).toBeLessThan(3000);
+    await reader.cancel().catch(() => {});
+  });
 });

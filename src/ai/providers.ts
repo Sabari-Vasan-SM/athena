@@ -1,4 +1,4 @@
-import { AiError, envKey, postJson, type AIProvider, type AiConfig, type Availability, type CompletionRequest, type CompletionResult } from './provider.js';
+import { AiError, envKey, isLoopbackUrl, postJson, providerBase, type AIProvider, type AiConfig, type Availability, type CompletionRequest, type CompletionResult } from './provider.js';
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -14,14 +14,14 @@ export const anthropicProvider: AIProvider = {
   defaultModel: 'claude-sonnet-5',
   keyEnvVar: 'ANTHROPIC_API_KEY',
   async available(config) {
-    return keyAvailability(anthropicProvider, config.baseUrl ?? 'https://api.anthropic.com');
+    return keyAvailability(anthropicProvider, providerBase(config, 'https://api.anthropic.com'));
   },
   async complete(config, req) {
     const key = envKey(anthropicProvider.keyEnvVar);
     if (!key) throw new AiError('ANTHROPIC_API_KEY is not set');
     const model = config.model ?? anthropicProvider.defaultModel;
     const json = await postJson(
-      `${config.baseUrl ?? 'https://api.anthropic.com'}/v1/messages`,
+      `${providerBase(config, 'https://api.anthropic.com')}/v1/messages`,
       { model, max_tokens: req.maxTokens ?? 2000, system: req.system, messages: [{ role: 'user', content: req.prompt }] },
       { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
       req,
@@ -40,14 +40,14 @@ export const openaiProvider: AIProvider = {
   defaultModel: 'gpt-4.1-mini',
   keyEnvVar: 'OPENAI_API_KEY',
   async available(config) {
-    return keyAvailability(openaiProvider, config.baseUrl ?? 'https://api.openai.com');
+    return keyAvailability(openaiProvider, providerBase(config, 'https://api.openai.com'));
   },
   async complete(config, req) {
     const key = envKey(openaiProvider.keyEnvVar);
     if (!key) throw new AiError('OPENAI_API_KEY is not set');
     const model = config.model ?? openaiProvider.defaultModel;
     const json = await postJson(
-      `${config.baseUrl ?? 'https://api.openai.com'}/v1/chat/completions`,
+      `${providerBase(config, 'https://api.openai.com')}/v1/chat/completions`,
       { model, max_completion_tokens: req.maxTokens ?? 2000, messages: [{ role: 'system', content: req.system }, { role: 'user', content: req.prompt }] },
       { authorization: `Bearer ${key}` },
       req,
@@ -68,7 +68,7 @@ export const googleProvider: AIProvider = {
   keyEnvVar: 'GEMINI_API_KEY',
   async available(config) {
     const key = envKey('GEMINI_API_KEY') ?? envKey('GOOGLE_API_KEY');
-    const endpoint = config.baseUrl ?? 'https://generativelanguage.googleapis.com';
+    const endpoint = providerBase(config, 'https://generativelanguage.googleapis.com');
     return key ? { ok: true, endpoint, keyEnvVar: 'GEMINI_API_KEY' } : { ok: false, reason: 'GEMINI_API_KEY (or GOOGLE_API_KEY) is not set', endpoint, keyEnvVar: 'GEMINI_API_KEY' };
   },
   async complete(config, req) {
@@ -76,7 +76,7 @@ export const googleProvider: AIProvider = {
     if (!key) throw new AiError('GEMINI_API_KEY is not set');
     const model = config.model ?? googleProvider.defaultModel;
     const json = await postJson(
-      `${config.baseUrl ?? 'https://generativelanguage.googleapis.com'}/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      `${providerBase(config, 'https://generativelanguage.googleapis.com')}/v1beta/models/${encodeURIComponent(model)}:generateContent`,
       { systemInstruction: { parts: [{ text: req.system }] }, contents: [{ role: 'user', parts: [{ text: req.prompt }] }], generationConfig: { maxOutputTokens: req.maxTokens ?? 2000 } },
       { 'x-goog-api-key': key },
       req,
@@ -94,7 +94,7 @@ export const ollamaProvider: AIProvider = {
   remote: false,
   defaultModel: 'llama3.1',
   async available(config) {
-    const endpoint = config.baseUrl ?? (process.env.OLLAMA_HOST?.trim() || 'http://127.0.0.1:11434');
+    const endpoint = ollamaEndpoint(config);
     try {
       const res = await fetch(`${endpoint}/api/tags`, { signal: AbortSignal.timeout(2000) });
       if (!res.ok) return { ok: false, reason: `Ollama responded ${res.status}`, endpoint };
@@ -106,7 +106,7 @@ export const ollamaProvider: AIProvider = {
     }
   },
   async complete(config, req) {
-    const endpoint = config.baseUrl ?? (process.env.OLLAMA_HOST?.trim() || 'http://127.0.0.1:11434');
+    const endpoint = ollamaEndpoint(config);
     const model = config.model ?? ollamaProvider.defaultModel;
     const json = await postJson(
       `${endpoint}/api/chat`,
@@ -118,6 +118,22 @@ export const ollamaProvider: AIProvider = {
     return { text: str(message.content), model, provider: 'ollama' };
   },
 };
+
+/** Ollama's endpoint: a trusted baseUrl, then OLLAMA_HOST, then the local default. */
+export function ollamaEndpoint(config: AiConfig): string {
+  const env = process.env.OLLAMA_HOST?.trim();
+  const fromEnv = env ? (/^https?:\/\//i.test(env) ? env : `http://${env}`) : undefined;
+  return providerBase(config, fromEnv ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
+}
+
+/**
+ * True when project content would leave this machine. Hosted providers always do;
+ * Ollama does whenever its endpoint is not a loopback address.
+ */
+export function isRemote(provider: AIProvider, config: AiConfig): boolean {
+  if (provider.id === 'ollama') return !isLoopbackUrl(ollamaEndpoint(config));
+  return provider.remote;
+}
 
 export const PROVIDERS: AIProvider[] = [anthropicProvider, openaiProvider, googleProvider, ollamaProvider];
 

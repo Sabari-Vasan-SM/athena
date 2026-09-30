@@ -62,7 +62,10 @@ export async function openCommand(opts: OpenOptions): Promise<void> {
     ui.line(ui.c.bold(ui.c.green('Athena is running')));
     ui.line();
     ui.line(`Local: ${ui.c.cyan(running.url)}`);
-    if (opts.allowRemote) ui.warn(ui.c.yellow(`Bound to ${host} — reachable from other machines. The access token in the URL is required for every API call.`));
+    if (opts.allowRemote) {
+      ui.warn(ui.c.yellow(`Bound to ${host} — reachable from other machines. The access token in the URL is required for every API call.`));
+      ui.warn(ui.c.yellow('This is plain HTTP: the token and your project knowledge cross the network unencrypted. Use it only on a network you trust, or put a TLS proxy / SSH tunnel in front. Requests must use this machine\'s address (Host header allowlist).'));
+    }
     ui.line();
     ui.line(ui.dim(opts.watch === false ? 'File watching is off.' : 'Watching for changes — knowledge updates are proposed in the UI, never applied without your review.'));
     ui.line(ui.dim('The link contains a private access token. Press Ctrl+C to stop.'));
