@@ -4,10 +4,14 @@
 
 ### Performance
 
-### - `athena open` reuses parsed `.athena` artifacts: a new `ProjectSession` loads `model.json`, `graph.json`, `security-scan.json` and `state.json` once and re-reads them only when the file changes (inode, size or mtime). The overview, graph, context, security and `athena security` paths share it, and the graph summary checks for `model.json` with a stat instead of parsing and validating the whole model.
-
+- `athena open` reuses parsed `.athena` artifacts: a new `ProjectSession` loads `model.json`, `graph.json`, `security-scan.json` and `state.json` once and re-reads them only when the file changes (inode, size or mtime). The overview, graph, context, security and `athena security` paths share it, and the graph summary checks for `model.json` with a stat instead of parsing and validating the whole model.
 - The event stream (`/api/events`) coalesces bursts into one write per 250 ms (intermediate activity states collapse to the latest), serializes each event once for all clients, and applies backpressure: a client that stops reading gets nothing more until its socket drains, keeps at most 100 queued events (oldest dropped) plus the latest activity, and then receives a `resync` frame with the number of events it missed. At most 16 event streams are open at once (503 beyond that).
 - `GET /api/sync` no longer includes each proposed document's full diff; the Sync page fetches a diff from the new `GET /api/sync/:doc` only when the document is expanded.
+- `athena event` (run by agent hooks on every tool call) starts about 2.5× faster and uses about 40% less memory (p50 112 ms / 100 MB → ~45 ms / 57 MB on the 20k-file benchmark): it no longer loads commander or any other command's dependencies. All other commands load their code on demand, which also lowers memory for `status`, `review` and `sync`.
+- The CLI is now built with code splitting: `dist/cli.js` is a small entry that loads chunks from `dist/` as needed.
+- Project graph building is linear in the number of edges (edge de-duplication, import traversal and package lookups no longer rescan everything); 50k import edges now build in about 0.1 s instead of 3.2 s, and 100k in about 0.25 s. Graph output is unchanged. `athena graph --node` and task-context expansion use a per-graph index.
+- Git metadata is collected with concurrent `git` processes, the `git --version` check runs once per process, and history is read once, bounded to the last 180 days / 2,000 commits. The contributor count in `model.json` (`git.contributorCount`) now counts authors in that window instead of the whole history.
+- Nested `.gitignore` matching only consults the path's own ancestor directories instead of every `.gitignore` in the project.
 
 ### Changed
 
@@ -15,14 +19,6 @@
 - `GET /api/sync` returns the proposal without `documents[].diff` (reasons, changed and preserved sections, additions/deletions and `diffTruncated` are still included). New `GET /api/sync/:doc[?planId=…]` returns one proposed document's diff; the id must be a knowledge document in the current proposal (404 otherwise, 409 when `planId` is stale). `POST /api/sync/check` still returns the full plan.
 - A corrupted `model.json` now gives a clear error with a hint (`model.json is corrupted (…)`, run `athena analyze`) instead of an internal error when starting a security scan from the web UI.
 - Test, source, auth, API and schema path patterns now come from one module (`src/core/patterns.ts`). `athena review` recognizes more test layouts (`integration_tests/`, `androidTest/`, `test_driver/`, `*_test.dart`), and change impact recognizes the same test files as review plus test runner configs.
-
-### - `athena event` (run by agent hooks on every tool call) starts about 2.5× faster and uses about 40% less memory (p50 112 ms / 100 MB → ~45 ms / 57 MB on the 20k-file benchmark): it no longer loads commander or any other command's dependencies. All other commands load their code on demand, which also lowers memory for `status`, `review` and `sync`.
-
-- The CLI is now built with code splitting: `dist/cli.js` is a small entry that loads chunks from `dist/` as needed.
-- Project graph building is linear in the number of edges (edge de-duplication, import traversal and package lookups no longer rescan everything); 50k import edges now build in about 0.1 s instead of 3.2 s, and 100k in about 0.25 s. Graph output is unchanged. `athena graph --node` and task-context expansion use a per-graph index.
-- Git metadata is collected with concurrent `git` processes, the `git --version` check runs once per process, and history is read once, bounded to the last 180 days / 2,000 commits. The contributor count in `model.json` (`git.contributorCount`) now counts authors in that window instead of the whole history.
-- Nested `.gitignore` matching only consults the path's own ancestor directories instead of every `.gitignore` in the project.
-
 
 ## 0.2.1 — 2026-09-30
 
