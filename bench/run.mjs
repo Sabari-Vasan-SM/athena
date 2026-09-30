@@ -68,8 +68,10 @@ async function main() {
     console.log(`Generating ${files} files in ${dir} …`);
     execFileSync(process.execPath, [path.join(here, 'generate.mjs'), dir, String(files)], { stdio: 'inherit' });
   }
-  // Start from a clean, committed state every time.
-  git(['reset', '-q', '--hard']);
+  // Start from the generated repo's first commit every time, so a previous run's
+  // committed .athena/ (and any leftover edits) never leak into this one.
+  const initial = execFileSync('git', ['rev-list', '--max-parents=0', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim().split('\n')[0];
+  git(['reset', '-q', '--hard', initial]);
   git(['clean', '-qfdx']);
 
   const results = {};

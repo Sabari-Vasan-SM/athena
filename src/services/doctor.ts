@@ -36,7 +36,8 @@ export async function runDoctor(cwd: string): Promise<{ checks: Check[]; root: s
   const projectRoot = root ?? cwd;
 
   if (await gitAvailable()) {
-    add({ area: 'Git', level: (await isGitRepo(projectRoot)) ? 'ok' : 'warn', message: (await isGitRepo(projectRoot)) ? 'Git repository detected' : 'Not a Git repository', hint: (await isGitRepo(projectRoot)) ? undefined : 'Change detection and knowledge history work best in a Git repository.' });
+    const repo = await isGitRepo(projectRoot);
+    add({ area: 'Git', level: repo ? 'ok' : 'warn', message: repo ? 'Git repository detected' : 'Not a Git repository', hint: repo ? undefined : 'Change detection and knowledge history work best in a Git repository.' });
   } else {
     add({ area: 'Git', level: 'warn', message: 'git executable not found', hint: 'Install Git to enable change detection and knowledge history.' });
   }
