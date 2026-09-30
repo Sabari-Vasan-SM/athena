@@ -56,7 +56,8 @@ export function registerSyncRoutes(ctx: ServerContext): void {
     state.syncBusy = true;
     const plan = state.currentPlan;
     try {
-      const result = await applySync(root, plan);
+      // Never interleaved with a plan in flight (which would read a half-written index).
+      const result = await ctx.scheduler.exclusive(() => applySync(root, plan));
       for (const d of plan.documents) {
         const text = await fs.readFile(path.join(athenaDir(root), d.file), 'utf8').catch(() => null);
         if (text !== null) ctx.recentWrites.set(d.file, contentHash(text));

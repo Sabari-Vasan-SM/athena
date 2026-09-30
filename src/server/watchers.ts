@@ -25,6 +25,11 @@ export function watchKnowledgeDir(ctx: ServerContext, feed: AgentActivityFeed): 
         void feed.readNew();
         return;
       }
+      // An analysis or sync from another process (e.g. `athena sync` in a terminal).
+      if (name === 'state.json') {
+        ctx.invalidateStatus();
+        return;
+      }
       if (!name || !KNOWLEDGE_DOCS.some((d) => d.file === name)) return;
       clearTimeout(pending.get(name));
       pending.set(
@@ -55,8 +60,13 @@ export async function watchProjectFiles(ctx: ServerContext, debounceMs?: number)
   try {
     state.watcher = await watchProject(ctx.root, {
       debounceMs,
+      scheduler: ctx.scheduler,
       onEvent: (e) => {
         switch (e.type) {
+          case 'changes':
+            // The status report is cached until the tree changes (not just for a TTL).
+            ctx.invalidateStatus();
+            break;
           case 'planning':
             if (!state.analysisRunning) events.setActivity({ state: 'ANALYZING', actor: 'athena', task: e.paths?.length ? `Checking ${e.paths.length} changed file${e.paths.length === 1 ? '' : 's'}` : 'Checking for changes', reading: [] });
             break;
@@ -78,6 +88,7 @@ export async function watchProjectFiles(ctx: ServerContext, debounceMs?: number)
             events.emit({ source: 'athena', type: 'sync.up-to-date', level: 'info', message: 'Files changed — knowledge already up to date (index refreshed)' });
             break;
           case 'git-head':
+            ctx.invalidateStatus();
             events.emit({ source: 'filesystem', type: 'git.head', level: 'info', message: `Git HEAD moved ${e.head?.from?.slice(0, 8) ?? '?'} → ${e.head?.to?.slice(0, 8) ?? '?'}` });
             break;
           case 'error':

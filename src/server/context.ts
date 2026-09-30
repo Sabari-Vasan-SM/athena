@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { buildStatus, type StatusReport } from '../services/status.js';
-import { planSync, type SyncPlan } from '../services/sync.js';
+import type { SyncPlan } from '../services/sync.js';
+import { AnalysisScheduler } from '../services/scheduler.js';
 import type { ProjectWatcher } from '../services/watch.js';
 import { projectSession, type ProjectSession } from '../services/project-session.js';
 import type { EventBus } from './events.js';
@@ -28,7 +29,9 @@ export interface ServerContext {
   /** file → content hash written by this server, to tell our own writes from external edits. */
   readonly recentWrites: Map<string, string>;
   readonly state: ServerState;
-  /** `buildStatus`, cached for 3 s. */
+  /** Single-flight, coalescing planner for this project (shared with the file watcher). */
+  readonly scheduler: AnalysisScheduler;
+  /** `buildStatus`, cached until a watched change (or for 3 s when not watching). */
   getStatus(): Promise<StatusReport>;
   invalidateStatus(): void;
   /** Record a plan as the current proposal (only if it proposes changes). */
@@ -40,10 +43,14 @@ export interface ServerContext {
 }
 
 const STATUS_TTL_MS = 3000;
+/** With a watcher, changes invalidate the status cache; the TTL is only a safety net. */
+const WATCHED_STATUS_TTL_MS = 30_000;
 
 export function createServerContext(init: { app: FastifyInstance; root: string; events: EventBus; instanceId: string }): ServerContext {
   const { root } = init;
   let statusCache: { at: number; report: StatusReport } | null = null;
+  let statusInflight: { gen: number; report: Promise<StatusReport> } | null = null;
+  let statusGen = 0;
   const state: ServerState = { analysisRunning: false, scanRunning: false, graphBuilding: false, syncBusy: false, currentPlan: null, lastCheckedAt: null, watcher: null };
 
   const ctx: ServerContext = {
@@ -51,14 +58,26 @@ export function createServerContext(init: { app: FastifyInstance; root: string; 
     session: projectSession(root),
     recentWrites: new Map(),
     state,
+    scheduler: new AnalysisScheduler(root),
     async getStatus() {
-      if (statusCache && Date.now() - statusCache.at < STATUS_TTL_MS) return statusCache.report;
-      const report = await buildStatus(root);
-      statusCache = { at: Date.now(), report };
+      const ttl = state.watcher ? WATCHED_STATUS_TTL_MS : STATUS_TTL_MS;
+      if (statusCache && Date.now() - statusCache.at < ttl) return statusCache.report;
+      // Concurrent requests share one computation.
+      if (statusInflight && statusInflight.gen === statusGen) return statusInflight.report;
+      const gen = statusGen;
+      const started = Date.now();
+      const inflight = { gen, report: buildStatus(root) };
+      statusInflight = inflight;
+      const report = await inflight.report.finally(() => {
+        if (statusInflight === inflight) statusInflight = null;
+      });
+      // Don't cache a report that an invalidation raced with.
+      if (gen === statusGen) statusCache = { at: started, report };
       return report;
     },
     invalidateStatus() {
       statusCache = null;
+      statusGen++;
     },
     setPlan(plan) {
       state.lastCheckedAt = new Date().toISOString();
@@ -66,7 +85,8 @@ export function createServerContext(init: { app: FastifyInstance; root: string; 
     },
     async checkNow() {
       if (state.watcher) return state.watcher.planNow();
-      const plan = await planSync(root);
+      // Single flight: concurrent checks share one analysis (or one follow-up run).
+      const plan = await ctx.scheduler.request({ reason: 'check' });
       ctx.setPlan(plan);
       return plan;
     },

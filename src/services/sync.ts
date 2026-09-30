@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
 import { analyzeProject, type AnalysisResult } from '../core/analyzer/analyze.js';
+import type { IncrementalInput, WalkSnapshot } from '../core/analyzer/incremental.js';
 import { KNOWLEDGE_DOCS, type GeneratedDocId } from '../core/knowledge/documents.js';
 import { ensureRules, planKnowledge, writePlannedKnowledge, type DocPlan } from '../core/knowledge/generate.js';
 import { diffModels, type ModelChange } from '../core/impact/model-diff.js';
@@ -128,6 +129,8 @@ async function readIgnored(dir: string): Promise<string | null> {
 export interface PlanOptions {
   signal?: AbortSignal;
   force?: boolean;
+  /** Re-stat only these changed paths on top of a previous walk (see analyzeProject). */
+  incremental?: IncrementalInput;
 }
 
 /**
@@ -146,7 +149,7 @@ export async function planSync(root: string, opts: PlanOptions = {}): Promise<Sy
   if (st.kind === 'corrupted') warnings.push(`state.json is corrupted (${st.reason}); it will be rebuilt on apply.`);
 
   const prevIndex = prevState ? await readFileIndex(dir) : {};
-  const [prevModel, analysis] = await Promise.all([projectSession(root).model(), analyzeProject(root, { signal: opts.signal, reuse: prevIndex })]);
+  const [prevModel, analysis] = await Promise.all([projectSession(root).model(), analyzeProject(root, { signal: opts.signal, reuse: prevIndex, incremental: opts.incremental })]);
   opts.signal?.throwIfAborted();
 
   const previousBlocks = prevState ? Object.fromEntries(Object.entries(prevState.documents).map(([k, v]) => [k, v.blocks])) : undefined;
@@ -227,6 +230,12 @@ export async function planSync(root: string, opts: PlanOptions = {}): Promise<Sy
   };
   internals.set(plan, { analysis, plans, prevState });
   return plan;
+}
+
+/** The walk behind a plan, for a later incremental plan (null once the plan was applied or dropped). */
+export function planSnapshot(plan: SyncPlan): { snapshot: WalkSnapshot; walkMode: 'full' | 'incremental' } | null {
+  const a = internals.get(plan)?.analysis;
+  return a ? { snapshot: a.snapshot, walkMode: a.walkMode } : null;
 }
 
 export interface ApplyResult {

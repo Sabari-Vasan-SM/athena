@@ -8,7 +8,8 @@ import { readTextIfExists } from '../core/util/fs.js';
 import { listRules, parseRules } from '../core/knowledge/rules.js';
 import { formatContext, getGraph, getRelevantContext, graphSummary } from '../services/context.js';
 import { buildStatus } from '../services/status.js';
-import { planSync, applySync, summarizePlan } from '../services/sync.js';
+import { applySync, summarizePlan } from '../services/sync.js';
+import { AnalysisScheduler } from '../services/scheduler.js';
 import { loadScan } from '../core/model/security-scan.js';
 import { ATHENA_VERSION } from '../services/version.js';
 import { redact } from '../core/security/secrets.js';
@@ -50,6 +51,8 @@ async function docText(root: string, file: string, suffix = ''): Promise<string>
 
 export function createMcpServer(opts: McpOptions): McpServer {
   const { root } = opts;
+  // Agents may call tools concurrently: planning is single-flight and coalesced.
+  const scheduler = new AnalysisScheduler(root);
   const server = new McpServer(
     { name: 'athena', version: ATHENA_VERSION },
     {
@@ -179,14 +182,14 @@ export function createMcpServer(opts: McpOptions): McpServer {
       inputSchema: { apply: z.boolean().optional().describe('Apply the update (only permitted when the server runs with --allow-write)') },
     },
     async ({ apply }) => {
-      const plan = await planSync(root);
+      const plan = await scheduler.request({ reason: 'mcp' });
       if (plan.upToDate) return textResult('Knowledge is already up to date; nothing to change.');
       const summary = [`${plan.documents.length} document(s) would change:`, ...plan.documents.map((d) => `- ${d.file}: ${d.reasons[0] ?? 'content differs'}`)].join('\n');
       if (!apply) return textResult(`${summary}\n\nNothing was written. Run \`athena sync\` to review and apply.`);
       if (!opts.allowWrite) {
         return { ...textResult(`${summary}\n\nRefused: this MCP server is read-only. Ask the developer to run \`athena sync\`.`), isError: true };
       }
-      const result = await applySync(root, plan);
+      const result = await scheduler.exclusive(() => applySync(root, plan));
       return textResult(`Updated: ${result.applied.join(', ')}.${result.preserved.length ? ` Developer-edited sections preserved in ${result.preserved.map((p) => p.file).join(', ')}.` : ''}`);
     },
   );
@@ -198,7 +201,7 @@ export function createMcpServer(opts: McpOptions): McpServer {
       const st = await readState(athenaDir(root));
       if (st.kind !== 'ok') return textResult(`Athena state is ${st.kind}. Run \`athena init\` (or \`athena analyze\`) in ${root}.`);
       const graph = await graphSummary(root);
-      const plan = await planSync(root).catch(() => null);
+      const plan = await scheduler.request({ reason: 'mcp' }).catch(() => null);
       return textResult(
         [
           `Project: ${st.state.projectName} (${root})`,

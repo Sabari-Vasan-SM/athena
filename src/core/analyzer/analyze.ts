@@ -1,5 +1,4 @@
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { ATHENA_DIR, loadConfig, type AthenaConfig } from '../config.js';
 import { mapLimit, walkProject, type FileEntry, type ReusableEntry } from '../fs/walker.js';
@@ -8,6 +7,9 @@ import { createContext, type AnalysisHints, type Detector, type FactDef } from '
 import { FactEngine, type ReadFileFn } from './engine.js';
 import { FactsCache, type FactsCacheStats } from '../cache/facts-cache.js';
 import { readFileIndex } from '../state/state.js';
+import { IgnoreMatcher } from '../fs/ignore.js';
+import { factsConfigHash } from './config-hash.js';
+import { incrementalWalk, readExclude, type IncrementalInput, type WalkSnapshot } from './incremental.js';
 import { structureDetector } from './detectors/structure.js';
 import { manifestsDetector } from './detectors/manifests.js';
 import { dependenciesDetector } from './detectors/dependencies.js';
@@ -64,6 +66,13 @@ export interface AnalyzeOptions {
   readFile?: ReadFileFn;
   /** Byte budget for file text kept in memory for aggregate-stage lookups (default 64MB). */
   textCacheBytes?: number;
+  /**
+   * Skip the full walk: start from a previous walk's snapshot and re-stat only
+   * these changed paths. Falls back to a full walk whenever that is not safe
+   * (see incrementalWalk). Only valid when every change since the snapshot's
+   * walk started is listed — the caller (a file watcher) guarantees that.
+   */
+  incremental?: IncrementalInput;
 }
 
 export interface AnalysisPerf {
@@ -81,15 +90,16 @@ export interface AnalysisResult {
   durationMs: number;
   /** I/O and cache counters for this run. */
   perf: AnalysisPerf;
+  /** How the file list was obtained. */
+  walkMode: 'full' | 'incremental';
+  /** Basis for a later incremental analysis in this process. */
+  snapshot: WalkSnapshot;
 }
 
 /** Facts not yet persisted (fresh init: `.athena/` did not exist during analysis). */
 const pendingCaches = new WeakMap<AnalysisResult, { cache: FactsCache; live: Set<string> }>();
 
-/** Hash of the config options facts depend on (what gets indexed and read). */
-export function factsConfigHash(config: AthenaConfig): string {
-  return crypto.createHash('sha256').update(JSON.stringify({ ignore: config.ignore, include: config.include, maxFileBytes: config.maxFileBytes })).digest('hex').slice(0, 16);
-}
+export { factsConfigHash };
 
 async function isDir(p: string): Promise<boolean> {
   return fs.stat(p).then((s) => s.isDirectory(), () => false);
@@ -118,11 +128,15 @@ export async function analyzeProject(rootInput: string, opts: AnalyzeOptions = {
   const reuse = opts.reuse ?? (useCache ? await readFileIndex(athena) : undefined);
 
   opts.onStage?.('scan');
-  const walk = await walkProject(root, { config, signal: opts.signal, reuse, deferRead: true });
+  const configHash = factsConfigHash(config);
+  const walkStarted = Date.now();
+  const [excludeText, prevWalk] = await Promise.all([readExclude(root), opts.incremental ? incrementalWalk(root, config, configHash, opts.incremental, opts.signal) : null]);
+  const matcher = prevWalk ? opts.incremental!.snapshot.matcher : await IgnoreMatcher.load(root, config);
+  const walk = prevWalk ?? (await walkProject(root, { config, signal: opts.signal, reuse, deferRead: true, matcher }));
   model.warnings.push(...walk.warnings);
 
   const runtime = await secretFingerprintKey(root, opts.fingerprintSalt);
-  const cache = await FactsCache.open(useCache ? athena : null, { detectors: DETECTORS_VERSION, config: factsConfigHash(config) });
+  const cache = await FactsCache.open(useCache ? athena : null, { detectors: DETECTORS_VERSION, config: configHash });
   const engine = new FactEngine({ root, files: walk.files, cache, runtime, defs: ALL_FACTS, signal: opts.signal, readFile: opts.readFile, textCacheBytes: opts.textCacheBytes });
   await cache.preload(walk.files.filter((f) => f.hash && !f.binary && !f.large).map((f) => f.hash));
 
@@ -176,6 +190,17 @@ export async function analyzeProject(rootInput: string, opts: AnalyzeOptions = {
     detectorVersions: Object.fromEntries(DETECTORS.map((d) => [d.id, d.version])),
     durationMs: 0,
     perf: { ...engine.stats, cache: cache.stats },
+    walkMode: prevWalk ? 'incremental' : 'full',
+    snapshot: {
+      files,
+      configHash,
+      maxFiles: config.maxFiles,
+      excludeText,
+      matcher,
+      // An incremental walk inherits reusability from the snapshot it started from.
+      reusable: engine.unreadable.size === 0 && (prevWalk ? true : !walk.truncated && walk.symlinks === 0 && walk.skippedUnreadable === 0),
+      takenAt: prevWalk ? opts.incremental!.snapshot.takenAt : walkStarted,
+    },
   };
   if (useCache) {
     try {

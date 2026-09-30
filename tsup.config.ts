@@ -1,4 +1,4 @@
-import { readdirSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { defineConfig, type Options } from 'tsup';
 
@@ -16,6 +16,7 @@ const removeStaleChunks: Plugin = {
     build.onEnd((result) => {
       if (result.errors.length || !result.outputFiles) return;
       const outDir = path.resolve(build.initialOptions.outdir ?? 'dist');
+      if (!existsSync(outDir)) return; // fresh checkout: nothing stale yet
       const fresh = new Set(result.outputFiles.map((f) => path.resolve(f.path)));
       for (const entry of readdirSync(outDir, { withFileTypes: true })) {
         const file = path.join(outDir, entry.name);

@@ -24,6 +24,8 @@ export interface WalkResult {
   skippedUnreadable: number;
   truncated: boolean;
   warnings: string[];
+  /** Symbolic links followed (files or directories inside the root). */
+  symlinks: number;
 }
 
 export interface WalkOptions {
@@ -58,7 +60,7 @@ export function sniffBinary(buf: Buffer): boolean {
 export async function walkProject(root: string, opts: WalkOptions): Promise<WalkResult> {
   const rootReal = await fs.realpath(root);
   const matcher = opts.matcher ?? (await IgnoreMatcher.load(rootReal, opts.config));
-  const result: WalkResult = { files: [], skippedBinary: 0, skippedLarge: 0, skippedUnreadable: 0, truncated: false, warnings: [] };
+  const result: WalkResult = { files: [], skippedBinary: 0, skippedLarge: 0, skippedUnreadable: 0, truncated: false, warnings: [], symlinks: 0 };
   const visitedDirs = new Set<string>([rootReal]);
   const pending: string[] = [];
   const isIgnored = (rel: string, isDir: boolean): boolean => matcher.ignores(rel, isDir);
@@ -100,6 +102,7 @@ export async function walkProject(root: string, opts: WalkOptions): Promise<Walk
           if (isDir) {
             if (visitedDirs.has(target)) continue; // loop protection
           }
+          result.symlinks++;
         } catch {
           continue; // broken link
         }
@@ -135,7 +138,7 @@ export async function walkProject(root: string, opts: WalkOptions): Promise<Walk
     const batch = pending.splice(0, pending.length);
     await mapLimit(batch, 32, async (rel) => {
       opts.signal?.throwIfAborted();
-      const entry = await indexFile(rootReal, rel, opts.config.maxFileBytes, opts.reuse?.[rel], opts.deferRead);
+      const entry = await statEntry(rootReal, rel, opts.config.maxFileBytes, opts.reuse?.[rel], opts.deferRead);
       if (!entry) {
         result.skippedUnreadable++;
         return;
@@ -148,7 +151,12 @@ export async function walkProject(root: string, opts: WalkOptions): Promise<Walk
   }
 }
 
-async function indexFile(root: string, rel: string, maxBytes: number, prev?: ReusableEntry, deferRead?: boolean): Promise<FileEntry | null> {
+/**
+ * Index one file the way the walk does: reuse `prev` when size and mtime match,
+ * otherwise read and hash it (or, with `deferRead`, return it with an empty hash).
+ * Null when the file cannot be stat-ed or read.
+ */
+export async function statEntry(root: string, rel: string, maxBytes: number, prev?: ReusableEntry, deferRead?: boolean): Promise<FileEntry | null> {
   const abs = path.join(root, rel);
   try {
     // Analysis stats every file: the synchronous call is about twice as fast as a

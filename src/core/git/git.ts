@@ -334,3 +334,47 @@ export async function headMovement(cwd: string, from: string, to: string, limit 
     });
   return { commits: commits.slice(0, limit), diverged: !ancestor.ok, truncated: commits.length > limit };
 }
+
+export interface StatusV2Entry {
+  /** '1' changed, '2' renamed/copied, 'u' unmerged, '?' untracked, '!' ignored. */
+  kind: '1' | '2' | 'u' | '?' | '!';
+  /** Repo-relative path. */
+  path: string;
+  /** Original path of a rename/copy. */
+  from?: string;
+  /** The entry is a submodule. */
+  submodule: boolean;
+}
+
+/** Parse `git status --porcelain=v2 -z` (without --branch headers). Null on malformed output. */
+export function parseStatusV2Z(stdout: string): StatusV2Entry[] | null {
+  const out: StatusV2Entry[] = [];
+  const parts = stdout.split('\0');
+  for (let i = 0; i < parts.length; i++) {
+    const rec = parts[i]!;
+    if (!rec) continue;
+    const kind = rec[0] as StatusV2Entry['kind'] | '#';
+    if (kind === '?' || kind === '!') {
+      out.push({ kind, path: rec.slice(2), submodule: false });
+      continue;
+    }
+    if (kind === '#') continue;
+    // Fixed-width fields before the path: 1 → 8, 2 → 9, u → 10.
+    if (kind !== '1' && kind !== '2' && kind !== 'u') return null;
+    const fields = kind === '1' ? 8 : kind === '2' ? 9 : 10;
+    let at = 0;
+    for (let f = 0; f < fields && at >= 0; f++) at = rec.indexOf(' ', at + 1);
+    if (at < 0) return null;
+    const sub = rec.split(' ', 3)[2] ?? 'N...';
+    const entry: StatusV2Entry = { kind, path: rec.slice(at + 1), submodule: sub.startsWith('S') };
+    if (kind === '2') entry.from = parts[++i];
+    out.push(entry);
+  }
+  return out;
+}
+
+/** Working-tree status (porcelain v2, all untracked files). Null when git fails. */
+export async function statusV2(cwd: string, opts: GitCallOptions = {}): Promise<StatusV2Entry[] | null> {
+  const r = await git(cwd, ['status', '--porcelain=v2', '-z', '--untracked-files=all', '--ignore-submodules=none', '--', '.'], { signal: opts.signal });
+  return r.ok ? parseStatusV2Z(r.stdout) : null;
+}

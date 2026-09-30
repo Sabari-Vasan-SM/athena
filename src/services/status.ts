@@ -8,6 +8,7 @@ import { athenaDir, buildFileIndex, diffFileIndex, readFileIndex, readState } fr
 import { readTextIfExists } from '../core/util/fs.js';
 import { workingChanges } from '../core/git/git.js';
 import { AthenaError } from './errors.js';
+import { fastIndexChanges } from './status-fast.js';
 
 export interface DocStatus {
   file: string;
@@ -29,7 +30,12 @@ export interface StatusReport {
   sync: 'up-to-date' | 'needs-update';
 }
 
-export async function buildStatus(root: string, signal?: AbortSignal): Promise<StatusReport> {
+export interface StatusOptions {
+  /** Walk the tree even when the cached index + Git could answer (tests compare both). */
+  noFastPath?: boolean;
+}
+
+export async function buildStatus(root: string, signal?: AbortSignal, opts: StatusOptions = {}): Promise<StatusReport> {
   const dir = athenaDir(root);
   const st = await readState(dir);
   if (st.kind === 'missing') throw new AthenaError('.athena/state.json is missing.', 'Run `athena analyze` to rebuild it.');
@@ -50,15 +56,17 @@ export async function buildStatus(root: string, signal?: AbortSignal): Promise<S
 
   const { config } = await loadConfig(root);
   const prevIndex = await readFileIndex(dir);
-  const walk = await walkProject(root, { config, signal, reuse: prevIndex });
-  const raw = diffFileIndex(prevIndex, buildFileIndex(walk.files));
+  // Fast path: stat the indexed files and ask Git for new ones instead of walking the tree.
+  const fast = state.git.isRepo && !opts.noFastPath ? await fastIndexChanges(root, config, prevIndex, signal) : null;
+  const raw = fast ? fast.diff : diffFileIndex(prevIndex, buildFileIndex((await walkProject(root, { config, signal, reuse: prevIndex })).files));
   // Files Athena manages for agent integrations are not developer changes.
   const managed = new Set(Object.values(state.agents).flatMap((a) => a.files));
   const keep = (p: string) => !managed.has(p);
   const changes = { added: raw.added.filter(keep), modified: raw.modified.filter(keep), deleted: raw.deleted.filter(keep) };
 
   const git = { isRepo: state.git.isRepo, branch: state.git.branch, headChanged: false, uncommitted: null as number | null };
-  if (state.git.isRepo) {
+  if (fast) git.uncommitted = fast.uncommitted;
+  else if (state.git.isRepo) {
     const wc = await workingChanges(root);
     git.uncommitted = wc ? wc.filter((f) => !f.path.startsWith('.athena/')).length : null;
   }

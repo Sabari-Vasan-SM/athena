@@ -5,7 +5,10 @@ import { loadConfig } from '../core/config.js';
 import { IgnoreMatcher } from '../core/fs/ignore.js';
 import { git } from '../core/git/git.js';
 import { toPosix } from '../core/util/paths.js';
-import { applySync, needsIndexRefreshOnly, planSync, type ApplyResult, type SyncPlan } from './sync.js';
+import { applySync, needsIndexRefreshOnly, type ApplyResult, type SyncPlan } from './sync.js';
+import { AnalysisScheduler } from './scheduler.js';
+import { factsConfigHash } from '../core/analyzer/config-hash.js';
+import { readExclude } from '../core/analyzer/incremental.js';
 
 export interface WatchEvent {
   type: 'changes' | 'planning' | 'plan' | 'applied' | 'refreshed' | 'git-head' | 'error' | 'ready';
@@ -25,6 +28,8 @@ export interface WatchOptions {
   autoApply?: boolean;
   onEvent: (e: WatchEvent) => void;
   signal?: AbortSignal;
+  /** Share a scheduler (e.g. the server's) so all planning for the project is single-flight. */
+  scheduler?: AnalysisScheduler;
 }
 
 export interface ProjectWatcher {
@@ -48,62 +53,53 @@ export async function watchProject(root: string, opts: WatchOptions): Promise<Pr
   const debounceMs = opts.debounceMs ?? 1500;
   const maxWaitMs = opts.maxWaitMs ?? 10_000;
   const { config } = await loadConfig(root);
-  const matcher = await IgnoreMatcher.load(root, config);
-  const pending = new Set<string>();
+  const [matcher, excludeText] = await Promise.all([IgnoreMatcher.load(root, config), readExclude(root)]);
+  const ownScheduler = !opts.scheduler;
+  const scheduler = opts.scheduler ?? new AnalysisScheduler(root);
   let timer: NodeJS.Timeout | null = null;
   let firstChangeAt = 0;
-  let running: Promise<SyncPlan | null> | null = null;
-  let rerun = false;
   let latest: SyncPlan | null = null;
   let closed = false;
 
   const toRel = (abs: string) => toPosix(path.relative(root, abs));
 
+  // Everything that happens to a plan, whoever requested it (debounce, planNow, or a
+  // server check sharing the scheduler), is reported through the watcher's events.
+  scheduler.hooks.onStart = (run) => {
+    if (!closed) opts.onEvent({ type: 'planning', paths: run.paths });
+  };
+  scheduler.hooks.onPlan = async (plan) => {
+    if (closed) return;
+    latest = plan;
+    if (plan.upToDate) {
+      latest = null;
+      if (needsIndexRefreshOnly(plan)) {
+        const result = await applySync(root, plan);
+        opts.onEvent({ type: 'refreshed', plan, result });
+      } else {
+        opts.onEvent({ type: 'plan', plan });
+      }
+      return;
+    }
+    if (opts.autoApply && !plan.ignored) {
+      const result = await applySync(root, plan);
+      latest = null;
+      opts.onEvent({ type: 'applied', plan, result });
+      return;
+    }
+    opts.onEvent({ type: 'plan', plan });
+  };
+
   const run = async (): Promise<SyncPlan | null> => {
     if (closed) return null;
-    if (running) {
-      rerun = true;
-      return running;
-    }
-    const paths = [...pending];
-    pending.clear();
     firstChangeAt = 0;
-    running = (async () => {
-      opts.onEvent({ type: 'planning', paths });
-      try {
-        const plan = await planSync(root, { signal: opts.signal });
-        if (closed) return null;
-        latest = plan;
-        if (plan.upToDate) {
-          latest = null;
-          if (needsIndexRefreshOnly(plan)) {
-            const result = await applySync(root, plan);
-            opts.onEvent({ type: 'refreshed', plan, result });
-          } else {
-            opts.onEvent({ type: 'plan', plan });
-          }
-          return plan;
-        }
-        if (opts.autoApply && !plan.ignored) {
-          const result = await applySync(root, plan);
-          latest = null;
-          opts.onEvent({ type: 'applied', plan, result });
-          return plan;
-        }
-        opts.onEvent({ type: 'plan', plan });
-        return plan;
-      } catch (err) {
-        if (!closed && !opts.signal?.aborted) opts.onEvent({ type: 'error', error: err as Error });
-        return null;
-      } finally {
-        running = null;
-        if (rerun && !closed) {
-          rerun = false;
-          schedule();
-        }
-      }
-    })();
-    return running;
+    try {
+      // supersede: fresh changes make an in-flight plan stale; the scheduler may abort it.
+      return await scheduler.request({ reason: 'watch', supersede: true });
+    } catch (err) {
+      if (!closed && !opts.signal?.aborted && (err as Error)?.name !== 'AbortError') opts.onEvent({ type: 'error', error: err as Error });
+      return null;
+    }
   };
 
   const schedule = () => {
@@ -122,13 +118,18 @@ export async function watchProject(root: string, opts: WatchOptions): Promise<Pr
     const rel = toRel(abs);
     if (!rel || rel.startsWith('..')) return;
     if (rel === '.gitignore' || rel.endsWith('/.gitignore')) {
+      // chokidar decided what to watch under the old rules: newly un-ignored paths may
+      // not be watched, so stop trusting events for incremental analysis (full walks).
+      scheduler.setTracking(false);
       const dir = rel === '.gitignore' ? '' : rel.slice(0, -'/.gitignore'.length);
       void fs
         .readFile(abs, 'utf8')
         .then((text) => matcher.setGitignore(dir, text))
         .catch(() => matcher.removeGitignore(dir));
     }
-    pending.add(rel);
+    // Reported to the scheduler right away (not after the debounce), so any plan —
+    // including one requested by someone else — accounts for it.
+    scheduler.noteChanges([rel]);
     opts.onEvent({ type: 'changes', paths: [rel] });
     schedule();
   };
@@ -149,7 +150,11 @@ export async function watchProject(root: string, opts: WatchOptions): Promise<Pr
   // Subscribe to 'ready' immediately: it can fire before any later await resolves.
   const ready = new Promise<void>((resolve) => watcher.once('ready', () => resolve()));
   watcher.on('add', onPath).on('change', onPath).on('unlink', onPath).on('addDir', onPath).on('unlinkDir', onPath);
-  watcher.on('error', (err) => opts.onEvent({ type: 'error', error: err as Error }));
+  watcher.on('error', (err) => {
+    // Events may have been lost: the next plan must walk the whole tree.
+    scheduler.resetBaseline();
+    opts.onEvent({ type: 'error', error: err as Error });
+  });
 
   // Git HEAD moves (commit, checkout, pull) are relevant even when the working tree is unchanged.
   let headWatcher: FSWatcher | null = null;
@@ -172,12 +177,18 @@ export async function watchProject(root: string, opts: WatchOptions): Promise<Pr
   }
 
   await ready;
+  // From here on every change is reported: plans may start from the previous walk.
+  scheduler.setTracking(true, { configHash: factsConfigHash(config), excludeText });
   opts.onEvent({ type: 'ready' });
 
   const close = async () => {
     if (closed) return;
     closed = true;
     if (timer) clearTimeout(timer);
+    scheduler.setTracking(false);
+    scheduler.hooks.onStart = undefined;
+    scheduler.hooks.onPlan = undefined;
+    if (ownScheduler) scheduler.close();
     await Promise.all([watcher.close(), headWatcher?.close()]);
   };
   opts.signal?.addEventListener('abort', () => void close(), { once: true });

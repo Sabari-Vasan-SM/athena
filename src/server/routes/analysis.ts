@@ -16,14 +16,18 @@ export function registerAnalysisRoutes(ctx: ServerContext): void {
       const started = Date.now();
       events.setActivity({ state: 'ANALYZING', actor: 'athena', task: 'Analyzing project', reading: [] });
       events.emit({ source: 'athena', type: 'analysis.started', level: 'info', message: 'Analysis started (requested from web UI)' });
-      void runPipeline({
-        root,
-        mode: 'analyze',
-        force: req.body?.force,
-        onStage: (stage) => {
-          if (STAGE_LABELS[stage]) events.setActivity({ state: 'ANALYZING', actor: 'athena', task: STAGE_LABELS[stage]!, reading: [] });
-        },
-      })
+      // Exclusive: no sync plan runs while the analysis rewrites state and the index.
+      void ctx.scheduler
+        .exclusive(() =>
+          runPipeline({
+            root,
+            mode: 'analyze',
+            force: req.body?.force,
+            onStage: (stage) => {
+              if (STAGE_LABELS[stage]) events.setActivity({ state: 'ANALYZING', actor: 'athena', task: STAGE_LABELS[stage]!, reading: [] });
+            },
+          }),
+        )
         .then((result) => {
           for (const d of result.docs) ctx.recentWrites.set(d.file, d.contentHash);
           const changed = result.docs.filter((d) => d.status !== 'unchanged').map((d) => d.file);

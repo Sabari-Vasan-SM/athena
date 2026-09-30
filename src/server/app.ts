@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { AthenaError, type ErrorKind } from '../services/errors.js';
 import { releaseProjectSession } from '../services/project-session.js';
 import { createServerContext } from './context.js';
+import type { AnalysisScheduler } from '../services/scheduler.js';
 import { EventBus } from './events.js';
 import { registerActivityRoutes, createAgentActivityFeed } from './routes/activity.js';
 import { registerAgentRoutes } from './routes/agents.js';
@@ -47,6 +48,8 @@ export interface AthenaServer {
   app: FastifyInstance;
   events: EventBus;
   instanceId: string;
+  /** The project's planning queue (diagnostics, tests). */
+  scheduler: AnalysisScheduler;
   close(): Promise<void>;
 }
 
@@ -139,9 +142,11 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
     app,
     events,
     instanceId,
+    scheduler: ctx.scheduler,
     async close() {
       await ctx.state.watcher?.close();
       ctx.state.watcher = null;
+      ctx.scheduler.close();
       stopDocsWatcher();
       events.close();
       await app.close();
