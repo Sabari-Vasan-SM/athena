@@ -1,0 +1,34 @@
+{
+  "label": "baseline-0.2.1",
+  "files": 20000,
+  "node": "v22.23.2",
+  "platform": "darwin-arm64",
+  "cpus": 10,
+  "date": "2026-09-30T16:22:27.531Z",
+  "results": {
+    "init (cold)": {
+      "ms": 3515,
+      "rssMb": 194
+    },
+    "sync --check (warm)": {
+      "ms": 2922,
+      "rssMb": 195
+    },
+    "sync --check (1 file)": {
+      "ms": 2891,
+      "rssMb": 195
+    },
+    "status": {
+      "ms": 341,
+      "rssMb": 133
+    },
+    "review (500 files)": {
+      "ms": 240,
+      "rssMb": 100
+    },
+    "event (p50 of 10)": {
+      "ms": 112,
+      "rssMb": 100
+    }
+  }
+}

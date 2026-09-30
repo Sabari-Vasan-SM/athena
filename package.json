@@ -35,7 +35,9 @@
     "prepublishOnly": "npm run typecheck && npm run build && npm test",
     "build:cli": "tsup",
     "build:web": "vite build --config web/vite.config.ts",
-    "dev:web": "vite --config web/vite.config.ts"
+    "dev:web": "vite --config web/vite.config.ts",
+    "bench": "npm run build:cli && node bench/run.mjs",
+    "bench:check": "npm run build:cli && node bench/run.mjs --check"
   },
   "keywords": [
     "ai",
