@@ -1,10 +1,12 @@
-import { promises as fs, statSync } from 'node:fs';
+// FROZEN COPY of src/core/fs/walker.ts at 0.2.1 — the legacy analyzer, used only by the golden test.
+// Do not edit; delete once the staged analyzer has shipped for a release.
+import { promises as fs } from 'node:fs';
 import type { Dirent } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import type { AthenaConfig } from '../config.js';
-import { IgnoreMatcher } from './ignore.js';
-import { toPosix } from '../util/paths.js';
+import type { AthenaConfig } from '../../../../src/core/config.js';
+import { IgnoreMatcher } from '../../../../src/core/fs/ignore.js';
+import { toPosix } from '../../../../src/core/util/paths.js';
 
 export interface FileEntry {
   /** Repo-relative POSIX path. */
@@ -34,26 +36,12 @@ export interface WalkOptions {
    * Previous index (path → truncated hash/size/mtime). When size and mtime match, the
    * previous hash (and binary flag) is reused instead of re-reading the file.
    */
-  reuse?: Record<string, ReusableEntry>;
+  reuse?: Record<string, { h: string; s: number; m: number; b?: 1 }>;
   /** Share a matcher (e.g. with a watcher). Nested .gitignore files found during the walk are registered on it. */
   matcher?: IgnoreMatcher;
-  /**
-   * Stat only: files that can't reuse a previous index entry are returned with an
-   * empty `hash` (binary unknown) instead of being read. The analyzer reads them
-   * exactly once in its content pass. Binary counts are then left to the caller.
-   */
-  deferRead?: boolean;
 }
-
-/** Previous index entry shape accepted by `reuse`. */
-export type ReusableEntry = { h: string; s: number; m: number; b?: 1 };
 
 const SNIFF_BYTES = 8000;
-
-/** A file is treated as binary when a NUL byte appears in its first 8000 bytes. */
-export function sniffBinary(buf: Buffer): boolean {
-  return buf.subarray(0, SNIFF_BYTES).includes(0);
-}
 
 export async function walkProject(root: string, opts: WalkOptions): Promise<WalkResult> {
   const rootReal = await fs.realpath(root);
@@ -84,7 +72,7 @@ export async function walkProject(root: string, opts: WalkOptions): Promise<Walk
     }
     for (const ent of entries) {
       const abs = path.join(dir, ent.name);
-      const rel = dirRel ? `${dirRel}/${ent.name}` : toPosix(ent.name);
+      const rel = toPosix(path.relative(rootReal, abs));
       let isDir = ent.isDirectory();
       let isFile = ent.isFile();
 
@@ -135,7 +123,7 @@ export async function walkProject(root: string, opts: WalkOptions): Promise<Walk
     const batch = pending.splice(0, pending.length);
     await mapLimit(batch, 32, async (rel) => {
       opts.signal?.throwIfAborted();
-      const entry = await indexFile(rootReal, rel, opts.config.maxFileBytes, opts.reuse?.[rel], opts.deferRead);
+      const entry = await indexFile(rootReal, rel, opts.config.maxFileBytes, opts.reuse?.[rel]);
       if (!entry) {
         result.skippedUnreadable++;
         return;
@@ -148,22 +136,19 @@ export async function walkProject(root: string, opts: WalkOptions): Promise<Walk
   }
 }
 
-async function indexFile(root: string, rel: string, maxBytes: number, prev?: ReusableEntry, deferRead?: boolean): Promise<FileEntry | null> {
+async function indexFile(root: string, rel: string, maxBytes: number, prev?: { h: string; s: number; m: number; b?: 1 }): Promise<FileEntry | null> {
   const abs = path.join(root, rel);
   try {
-    // Analysis stats every file: the synchronous call is about twice as fast as a
-    // thread-pool round trip per file (batches of 256 keep the event loop responsive).
-    const st = deferRead ? statSync(abs) : await fs.stat(abs);
-    // Reuse only when the entry is consistent with the current size limit (maxFileBytes may have changed).
-    if (prev && prev.s === st.size && prev.m === Math.floor(st.mtimeMs) && prev.h.startsWith('meta:') === st.size > maxBytes) {
+    const st = await fs.stat(abs);
+    if (prev && prev.s === st.size && prev.m === Math.floor(st.mtimeMs)) {
       return { path: rel, size: st.size, mtimeMs: prev.m, hash: prev.h, binary: prev.b === 1, large: prev.h.startsWith('meta:') };
     }
     if (st.size > maxBytes) {
       return { path: rel, size: st.size, mtimeMs: Math.floor(st.mtimeMs), hash: `meta:${st.size}:${Math.floor(st.mtimeMs)}`, binary: false, large: true };
     }
-    if (deferRead) return { path: rel, size: st.size, mtimeMs: Math.floor(st.mtimeMs), hash: '', binary: false, large: false };
     const buf = await fs.readFile(abs);
-    const binary = sniffBinary(buf);
+    const sniff = buf.subarray(0, SNIFF_BYTES);
+    const binary = sniff.includes(0);
     return {
       path: rel,
       size: st.size,

@@ -1,12 +1,13 @@
+// FROZEN COPY of src/core/analyzer/detectors/secrets.ts at 0.2.1 — the legacy analyzer, used only by the golden test.
+// Do not edit; delete once the staged analyzer has shipped for a release.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
-import type { Detector, FactDef, FactRuntime } from '../context.js';
+import type { Detector } from '../context.js';
 import type { FileEntry } from '../../fs/walker.js';
-import type { SecretFinding } from '../../model/project-model.js';
-import { ephemeralFingerprint, scanText, type ScanStats } from '../../security/secrets.js';
-import { getOrCreateSalt, keyedFingerprint, readLocalConfig } from '../../local-config.js';
-import { ATHENA_DIR } from '../../config.js';
+import type { SecretFinding } from '../../../../../src/core/model/project-model.js';
+import { ephemeralFingerprint, scanText, type ScanStats } from '../../../../../src/core/security/secrets.js';
+import { getOrCreateSalt, keyedFingerprint, readLocalConfig } from '../../../../../src/core/local-config.js';
+import { ATHENA_DIR } from '../../../../../src/core/config.js';
 
 const SKIP = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lock|poetry\.lock|uv\.lock|Cargo\.lock|go\.sum|composer\.lock|Gemfile\.lock|pubspec\.lock)$|\.(min\.js|map|svg|snap)$/;
 export const MAX_SECRET_FINDINGS = 500;
@@ -19,31 +20,21 @@ export const MAX_SECRET_FINDINGS = 500;
  * per-process key is used. Never an unsalted hash of the value.
  */
 export async function secretFingerprinter(root: string): Promise<(value: string) => string> {
-  return (await secretFingerprintKey(root)).fingerprint;
-}
-
-/**
- * The fingerprint function plus an id for its key (a hash of the salt, so cached
- * findings are only reused under the same key). `salt` overrides the project's
- * salt (a fresh init creates it before `.athena/` exists). The id is null for the
- * ephemeral per-process key: such findings are never persisted.
- */
-export async function secretFingerprintKey(root: string, saltOverride?: string): Promise<FactRuntime> {
   try {
-    let salt = saltOverride;
-    if (!salt) salt = (await readLocalConfig(root)).salt;
+    const existing = (await readLocalConfig(root)).salt;
+    let salt = existing;
     if (!salt) {
       const hasDir = await fs.stat(path.join(root, ATHENA_DIR)).then((s) => s.isDirectory(), () => false);
       if (hasDir) salt = await getOrCreateSalt(root);
     }
     if (salt) {
       const key = salt;
-      return { fingerprint: (value) => keyedFingerprint(key, value), fingerprintKeyId: crypto.createHash('sha256').update(`athena-fingerprint-key:${key}`).digest('hex').slice(0, 12) };
+      return (value) => keyedFingerprint(key, value);
     }
   } catch {
     /* fall back to an ephemeral key */
   }
-  return { fingerprint: ephemeralFingerprint, fingerprintKeyId: null };
+  return ephemeralFingerprint;
 }
 
 export interface SecretScanResult {
@@ -76,17 +67,6 @@ export async function scanFilesForSecrets(
   return { findings, truncated, skippedLongLines: stats.skippedLongLines };
 }
 
-/** Findings in one file: [type, line, keyed fingerprint]. Keyed by the fingerprint key. */
-const secretsFact: FactDef<Array<[string, number, string]>> = {
-  id: 'secrets',
-  keyed: true,
-  applies: (f) => !f.binary && !f.large && !SKIP.test(f.path),
-  compute(text, _rel, rt) {
-    if (!text) return [];
-    return scanText(text, { fingerprint: rt.fingerprint }).map((m) => [m.type, m.line, m.fingerprint]);
-  },
-};
-
 /**
  * Scans indexed text files for likely credentials. Only type, location and a keyed
  * fingerprint are recorded — never the value or a plain hash of it.
@@ -94,22 +74,9 @@ const secretsFact: FactDef<Array<[string, number, string]>> = {
 export const secretsDetector: Detector = {
   id: 'secrets',
   version: 2,
-  facts: [secretsFact],
   async run(ctx) {
-    // Same traversal and cap as scanFilesForSecrets, from cached per-file findings.
-    const findings = ctx.model.security.secrets;
-    let truncated = false;
-    for (const f of ctx.files) {
-      if (f.binary || f.large || SKIP.test(f.path)) continue;
-      if (findings.length >= MAX_SECRET_FINDINGS) {
-        truncated = true;
-        break;
-      }
-      ctx.signal?.throwIfAborted();
-      const rows = await ctx.fact(f.path, secretsFact);
-      if (!rows) continue;
-      for (const [type, line, fingerprint] of rows) findings.push({ type, file: f.path, line, fingerprint });
-    }
-    if (truncated) ctx.warn(`Secret scan stopped after ${MAX_SECRET_FINDINGS} findings.`);
+    const fingerprint = await secretFingerprinter(ctx.root);
+    const r = await scanFilesForSecrets(ctx.files, (rel) => ctx.read(rel), { fingerprint, signal: ctx.signal, into: ctx.model.security.secrets });
+    if (r.truncated) ctx.warn(`Secret scan stopped after ${MAX_SECRET_FINDINGS} findings.`);
   },
 };

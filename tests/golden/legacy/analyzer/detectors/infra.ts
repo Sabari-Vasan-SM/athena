@@ -1,8 +1,10 @@
+// FROZEN COPY of src/core/analyzer/detectors/infra.ts at 0.2.1 — the legacy analyzer, used only by the golden test.
+// Do not edit; delete once the staged analyzer has shipped for a release.
 import { parseAllDocuments, parse as parseYaml } from 'yaml';
-import type { AnalysisContext, Detector, FactDef } from '../context.js';
-import type { CiJob, ContainerService } from '../../model/project-model.js';
-import { detected } from '../../model/fact.js';
-import { redact } from '../../security/secrets.js';
+import type { AnalysisContext, Detector } from '../context.js';
+import type { CiJob, ContainerService } from '../../../../../src/core/model/project-model.js';
+import { detected } from '../../../../../src/core/model/fact.js';
+import { redact } from '../../../../../src/core/security/secrets.js';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -54,213 +56,96 @@ function trimCmd(s: string): string {
   return redact(one.length > 160 ? `${one.slice(0, 157)}...` : one);
 }
 
-const COMPOSE_RE = /(^|\/)(docker-)?compose(\.[\w-]+)?\.ya?ml$/;
-
-type ServiceFact = Omit<ContainerService, 'file'>;
-/** Compose services, or `{ invalid: true }` when the YAML does not parse. */
-const composeFact: FactDef<{ services: ServiceFact[] } | { invalid: true }> = {
-  id: 'compose-services',
-  applies: (f) => COMPOSE_RE.test(f.path),
-  compute(text) {
-    const services: ServiceFact[] = [];
-    if (!text) return { services };
+async function composeServices(ctx: AnalysisContext): Promise<ContainerService[]> {
+  const out: ContainerService[] = [];
+  for (const f of ctx.find(/(^|\/)(docker-)?compose(\.[\w-]+)?\.ya?ml$/)) {
+    const text = await ctx.read(f.path);
+    if (!text) continue;
     let y: unknown;
     try {
       y = parseYaml(text);
     } catch {
-      return { invalid: true };
+      ctx.warn(`Could not parse ${f.path} (invalid YAML)`);
+      continue;
     }
-    if (!isObj(y) || !isObj(y.services)) return { services };
+    if (!isObj(y) || !isObj(y.services)) continue;
     for (const [name, svc] of Object.entries(y.services)) {
       if (!isObj(svc)) continue;
-      services.push({
+      out.push({
         name,
         image: typeof svc.image === 'string' ? svc.image : isObj(svc.build) || typeof svc.build === 'string' ? '(built locally)' : undefined,
         ports: strList(svc.ports),
         dependsOn: strList(svc.depends_on),
+        file: f.path,
       });
     }
-    return { services };
-  },
-};
-
-async function composeServices(ctx: AnalysisContext): Promise<ContainerService[]> {
-  const out: ContainerService[] = [];
-  for (const f of ctx.find(COMPOSE_RE)) {
-    const v = await ctx.fact(f.path, composeFact);
-    if (!v) continue;
-    if ('invalid' in v) {
-      ctx.warn(`Could not parse ${f.path} (invalid YAML)`);
-      continue;
-    }
-    for (const svc of v.services) out.push({ name: svc.name, image: svc.image, ports: svc.ports, dependsOn: svc.dependsOn, file: f.path });
   }
   return out;
 }
 
-type JobFact = { name: string; commands: string[] };
-/** Jobs from a CI YAML file; `invalid` when the YAML does not parse (a warning is emitted). */
-type CiFact = { invalid: true } | { jobs: JobFact[] };
+async function ciJobs(ctx: AnalysisContext): Promise<CiJob[]> {
+  const jobs: CiJob[] = [];
+  const loadYaml = async (p: string): Promise<Obj | null> => {
+    const text = await ctx.read(p);
+    if (!text) return null;
+    try {
+      const y = parseYaml(text);
+      return isObj(y) ? y : null;
+    } catch {
+      ctx.warn(`Could not parse ${p} (invalid YAML)`);
+      return null;
+    }
+  };
 
-/** loadYaml semantics of the original detector: null for empty/unparsable/non-object YAML. */
-function ciYaml(text: string): { invalid: true } | { y: Obj | null } {
-  if (!text) return { y: null };
-  try {
-    const y = parseYaml(text);
-    return { y: isObj(y) ? y : null };
-  } catch {
-    return { invalid: true };
-  }
-}
-
-const GHA_RE = /^\.github\/workflows\/[^/]+\.ya?ml$/;
-const githubActionsFact: FactDef<CiFact> = {
-  id: 'ci-github-actions',
-  applies: (f) => GHA_RE.test(f.path),
-  compute(text) {
-    const r = ciYaml(text);
-    if ('invalid' in r) return r;
-    const jobs: JobFact[] = [];
-    const y = r.y;
-    if (!y || !isObj(y.jobs)) return { jobs };
+  for (const f of ctx.find(/^\.github\/workflows\/[^/]+\.ya?ml$/)) {
+    const y = await loadYaml(f.path);
+    if (!y || !isObj(y.jobs)) continue;
     for (const [id, job] of Object.entries(y.jobs)) {
       if (!isObj(job)) continue;
       const steps = Array.isArray(job.steps) ? job.steps : [];
       const commands = steps.flatMap((s) => (isObj(s) && typeof s.run === 'string' ? [trimCmd(s.run)] : isObj(s) && typeof s.uses === 'string' ? [`uses: ${s.uses}`] : []));
-      jobs.push({ name: typeof job.name === 'string' ? job.name : id, commands: commands.slice(0, 12) });
+      jobs.push({ system: 'GitHub Actions', file: f.path, name: typeof job.name === 'string' ? job.name : id, commands: commands.slice(0, 12) });
     }
-    return { jobs };
-  },
-};
-
-const gitlabFact: FactDef<CiFact> = {
-  id: 'ci-gitlab',
-  applies: (f) => f.path === '.gitlab-ci.yml',
-  compute(text) {
-    const r = ciYaml(text);
-    if ('invalid' in r) return r;
-    const jobs: JobFact[] = [];
-    const y = r.y;
+  }
+  if (ctx.has('.gitlab-ci.yml')) {
+    const y = await loadYaml('.gitlab-ci.yml');
     if (y) for (const [id, job] of Object.entries(y)) {
       if (id.startsWith('.') || !isObj(job) || !('script' in job)) continue;
       const script = Array.isArray(job.script) ? job.script.map(String) : [String(job.script)];
-      jobs.push({ name: id, commands: script.map(trimCmd).slice(0, 12) });
+      jobs.push({ system: 'GitLab CI', file: '.gitlab-ci.yml', name: id, commands: script.map(trimCmd).slice(0, 12) });
     }
-    return { jobs };
-  },
-};
-
-const circleFact: FactDef<CiFact> = {
-  id: 'ci-circleci',
-  applies: (f) => f.path === '.circleci/config.yml',
-  compute(text) {
-    const r = ciYaml(text);
-    if ('invalid' in r) return r;
-    const jobs: JobFact[] = [];
-    const y = r.y;
+  }
+  if (ctx.has('.circleci/config.yml')) {
+    const y = await loadYaml('.circleci/config.yml');
     if (y && isObj(y.jobs)) for (const [id, job] of Object.entries(y.jobs)) {
       const steps = isObj(job) && Array.isArray(job.steps) ? job.steps : [];
       const commands = steps.flatMap((s) => (isObj(s) && isObj(s.run) && typeof s.run.command === 'string' ? [trimCmd(s.run.command)] : isObj(s) && typeof s.run === 'string' ? [trimCmd(s.run)] : []));
-      jobs.push({ name: id, commands: commands.slice(0, 12) });
+      jobs.push({ system: 'CircleCI', file: '.circleci/config.yml', name: id, commands: commands.slice(0, 12) });
     }
-    return { jobs };
-  },
-};
-
-const JENKINS_RE = /(^|\/)Jenkinsfile$/;
-const jenkinsFact: FactDef<string[]> = {
-  id: 'ci-jenkins-stages',
-  applies: (f) => JENKINS_RE.test(f.path),
-  compute: (text) => [...text.matchAll(/stage\s*\(\s*['"]([^'"]+)['"]/g)].map((m) => m[1]!),
-};
-
-async function ciJobs(ctx: AnalysisContext): Promise<CiJob[]> {
-  const jobs: CiJob[] = [];
-  const load = async (p: string, def: FactDef<CiFact>): Promise<JobFact[]> => {
-    const v = await ctx.fact(p, def);
-    if (!v) return [];
-    if ('invalid' in v) {
-      ctx.warn(`Could not parse ${p} (invalid YAML)`);
-      return [];
-    }
-    return v.jobs;
-  };
-
-  for (const f of ctx.find(GHA_RE)) {
-    for (const j of await load(f.path, githubActionsFact)) jobs.push({ system: 'GitHub Actions', file: f.path, name: j.name, commands: j.commands });
-  }
-  if (ctx.has('.gitlab-ci.yml')) {
-    for (const j of await load('.gitlab-ci.yml', gitlabFact)) jobs.push({ system: 'GitLab CI', file: '.gitlab-ci.yml', name: j.name, commands: j.commands });
-  }
-  if (ctx.has('.circleci/config.yml')) {
-    for (const j of await load('.circleci/config.yml', circleFact)) jobs.push({ system: 'CircleCI', file: '.circleci/config.yml', name: j.name, commands: j.commands });
   }
   for (const f of ctx.find(/(^|\/)azure-pipelines\.ya?ml$/)) jobs.push({ system: 'Azure Pipelines', file: f.path, name: 'pipeline', commands: [] });
   for (const f of ctx.find(/(^|\/)bitbucket-pipelines\.yml$/)) jobs.push({ system: 'Bitbucket Pipelines', file: f.path, name: 'pipeline', commands: [] });
-  for (const f of ctx.find(JENKINS_RE)) {
-    const stages = (await ctx.fact(f.path, jenkinsFact)) ?? [];
+  for (const f of ctx.find(/(^|\/)Jenkinsfile$/)) {
+    const text = (await ctx.read(f.path)) ?? '';
+    const stages = [...text.matchAll(/stage\s*\(\s*['"]([^'"]+)['"]/g)].map((m) => m[1]!);
     if (stages.length) for (const s of stages) jobs.push({ system: 'Jenkins', file: f.path, name: s, commands: [] });
     else jobs.push({ system: 'Jenkins', file: f.path, name: 'pipeline', commands: [] });
   }
   return jobs;
 }
 
-const DOCKERFILE_RE = /(^|\/)(Dockerfile|Containerfile)(\.[\w.-]+)?$|\.dockerfile$/i;
-const dockerfileFact: FactDef<{ baseImages: string[]; exposedPorts: string[] } | false> = {
-  id: 'dockerfile',
-  applies: (f) => DOCKERFILE_RE.test(f.path),
-  compute(text) {
-    if (!text) return false;
-    const baseImages = [...text.matchAll(/^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)/gim)].map((m) => m[1]!);
-    const exposedPorts = [...text.matchAll(/^\s*EXPOSE\s+(.+)$/gim)].flatMap((m) => m[1]!.trim().split(/\s+/));
-    return { baseImages: [...new Set(baseImages)], exposedPorts: [...new Set(exposedPorts)] };
-  },
-};
-
-const terraformFact: FactDef<string[]> = {
-  id: 'terraform-providers',
-  applies: (f) => /\.tf$/.test(f.path),
-  compute(text) {
-    const out: string[] = [];
-    if (!text) return out;
-    for (const m of text.matchAll(/(?:provider|required_providers)\s*"?([a-z0-9_-]+)"?\s*\{|source\s*=\s*"(?:[\w.-]+\/)?([\w-]+)\/([\w-]+)"/g)) {
-      const p = m[1] ?? m[3];
-      if (p && p !== 'required_providers') out.push(p);
-    }
-    return out;
-  },
-};
-
-const K8S_SKIP = /(^|\/)(\.github|\.gitlab|\.circleci)\//;
-const k8sFact: FactDef<string[]> = {
-  id: 'k8s-kinds',
-  applies: (f) => /\.ya?ml$/.test(f.path) && !f.large && !K8S_SKIP.test(f.path) && !/compose/.test(f.path),
-  compute(text) {
-    const kinds: string[] = [];
-    if (!text || !/^apiVersion:/m.test(text) || !/^kind:/m.test(text)) return kinds;
-    try {
-      for (const doc of parseAllDocuments(text)) {
-        const j = doc.toJSON() as unknown;
-        if (isObj(j) && typeof j.kind === 'string' && typeof j.apiVersion === 'string') kinds.push(j.kind);
-      }
-    } catch {
-      /* templated YAML (Helm) is expected to fail */
-    }
-    return kinds;
-  },
-};
-
 export const infraDetector: Detector = {
   id: 'infra',
   version: 1,
-  facts: [dockerfileFact, composeFact, terraformFact, k8sFact, githubActionsFact, gitlabFact, circleFact, jenkinsFact],
   async run(ctx) {
     const { model } = ctx;
 
-    for (const f of ctx.find(DOCKERFILE_RE)) {
-      const v = await ctx.fact(f.path, dockerfileFact);
-      if (!v) continue;
-      model.containers.dockerfiles.push({ path: f.path, baseImages: v.baseImages, exposedPorts: v.exposedPorts });
+    for (const f of ctx.find(/(^|\/)(Dockerfile|Containerfile)(\.[\w.-]+)?$|\.dockerfile$/i)) {
+      const text = await ctx.read(f.path);
+      if (!text) continue;
+      const baseImages = [...text.matchAll(/^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)/gim)].map((m) => m[1]!);
+      const exposedPorts = [...text.matchAll(/^\s*EXPOSE\s+(.+)$/gim)].flatMap((m) => m[1]!.trim().split(/\s+/));
+      model.containers.dockerfiles.push({ path: f.path, baseImages: [...new Set(baseImages)], exposedPorts: [...new Set(exposedPorts)] });
     }
 
     model.containers.services = await composeServices(ctx);
@@ -281,18 +166,28 @@ export const infraDetector: Detector = {
 
     const tfProviders = new Map<string, string>();
     for (const f of ctx.find(/\.tf$/)) {
-      const providers = await ctx.fact(f.path, terraformFact);
-      if (!providers) continue;
-      for (const p of providers) if (!tfProviders.has(p)) tfProviders.set(p, f.path);
+      const text = await ctx.read(f.path);
+      if (!text) continue;
+      for (const m of text.matchAll(/(?:provider|required_providers)\s*"?([a-z0-9_-]+)"?\s*\{|source\s*=\s*"(?:[\w.-]+\/)?([\w-]+)\/([\w-]+)"/g)) {
+        const p = m[1] ?? m[3];
+        if (p && p !== 'required_providers' && !tfProviders.has(p)) tfProviders.set(p, f.path);
+      }
     }
     for (const [p, file] of tfProviders) model.infrastructure.push({ name: `Terraform provider: ${p}`, kind: 'iac', file, provenance: detected('config', [{ file }]) });
 
     const k8sKinds = new Map<string, string>();
     for (const f of ctx.find(/\.ya?ml$/)) {
-      if (f.large || K8S_SKIP.test(f.path) || /compose/.test(f.path)) continue;
-      const kinds = await ctx.fact(f.path, k8sFact);
-      if (!kinds) continue;
-      for (const kind of kinds) if (!k8sKinds.has(kind)) k8sKinds.set(kind, f.path);
+      if (f.large || /(^|\/)(\.github|\.gitlab|\.circleci)\//.test(f.path) || /compose/.test(f.path)) continue;
+      const text = await ctx.read(f.path);
+      if (!text || !/^apiVersion:/m.test(text) || !/^kind:/m.test(text)) continue;
+      try {
+        for (const doc of parseAllDocuments(text)) {
+          const j = doc.toJSON() as unknown;
+          if (isObj(j) && typeof j.kind === 'string' && typeof j.apiVersion === 'string' && !k8sKinds.has(j.kind)) k8sKinds.set(j.kind, f.path);
+        }
+      } catch {
+        /* templated YAML (Helm) is expected to fail */
+      }
     }
     for (const [kind, file] of k8sKinds) model.infrastructure.push({ name: `Kubernetes ${kind}`, kind: 'kubernetes', file, provenance: detected('config', [{ file }]) });
 

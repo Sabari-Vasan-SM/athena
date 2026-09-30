@@ -1,10 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { analyzeProject, type AnalysisResult } from '../core/analyzer/analyze.js';
+import { analyzeProject, persistAnalysisCache, type AnalysisResult } from '../core/analyzer/analyze.js';
 import { ATHENA_DIR } from '../core/config.js';
 import { ensureRules, writeKnowledge, type DocWriteReport } from '../core/knowledge/generate.js';
-import { athenaDir, backupCorruptedState, buildFileIndex, readState, writeState, type AthenaState } from '../core/state/state.js';
+import { athenaDir, backupCorruptedState, buildFileIndex, readState, STATE_SCHEMA_VERSION, writeState, type AthenaState, type FileIndex } from '../core/state/state.js';
+import { LOCAL_CONFIG_FILE } from '../core/local-config.js';
 import { exists, readTextIfExists, sha256, writeFileAtomic } from '../core/util/fs.js';
 import type { FileEntry } from '../core/fs/walker.js';
 import type { AgentAdapter, PlannedFileChange } from '../core/agents/adapter.js';
@@ -44,13 +45,14 @@ const ATHENA_GITIGNORE = [
   '.agent-events.jsonl',
   '.agent-events.1.jsonl',
   '.agent-events.rotate.lock',
+  'cache/',
   '# Machine-local settings and secrets (never commit).',
   'local.json',
   '',
 ].join('\n');
 
 /** Entries every .athena/.gitignore should carry; older projects are topped up in place. */
-const GITIGNORE_ENTRIES = ['state.json', 'model.json', 'graph.json', 'security-scan.json', 'ai-suggestions.md', '.backup/', '.server.json', '.sync-ignore.json', '.agent-events.jsonl', '.agent-events.1.jsonl', '.agent-events.rotate.lock', 'local.json'];
+const GITIGNORE_ENTRIES = ['state.json', 'model.json', 'graph.json', 'security-scan.json', 'ai-suggestions.md', '.backup/', '.server.json', '.sync-ignore.json', '.agent-events.jsonl', '.agent-events.1.jsonl', '.agent-events.rotate.lock', 'cache/', 'local.json'];
 
 async function ensureGitignoreEntries(file: string): Promise<void> {
   const existing = await readTextIfExists(file);
@@ -65,13 +67,13 @@ async function ensureGitignoreEntries(file: string): Promise<void> {
 }
 
 /** Include files Athena itself just wrote (agent integrations) so they don't show up as external changes. */
-export async function indexWithIntegrations(root: string, files: FileEntry[], written: string[]): Promise<AthenaState['fileIndex']> {
+export async function indexWithIntegrations(root: string, files: FileEntry[], written: string[]): Promise<FileIndex> {
   const index = buildFileIndex(files);
   for (const rel of written) {
     try {
       const abs = path.join(root, rel);
       const [st, buf] = await Promise.all([fs.stat(abs), fs.readFile(abs)]);
-      index[rel] = { h: sha256(buf).slice(0, 16), s: st.size, m: Math.floor(st.mtimeMs) };
+      index[rel] = { h: sha256(buf), s: st.size, m: Math.floor(st.mtimeMs) };
     } catch {
       /* removed or unreadable — leave as analyzed */
     }
@@ -80,7 +82,7 @@ export async function indexWithIntegrations(root: string, files: FileEntry[], wr
 }
 
 /** Build the next state.json from an analysis and the documents written for it. */
-export function composeState(input: { prevState: AthenaState | null; analysis: AnalysisResult; docs: DocWriteReport[]; agents: AthenaState['agents']; fileIndex: AthenaState['fileIndex'] }): AthenaState {
+export function composeState(input: { prevState: AthenaState | null; analysis: AnalysisResult; docs: DocWriteReport[]; agents: AthenaState['agents']; fileIndex: FileIndex }): AthenaState {
   const { prevState, analysis, docs } = input;
   const now = new Date().toISOString();
   const documents: AthenaState['documents'] = {};
@@ -96,7 +98,7 @@ export function composeState(input: { prevState: AthenaState | null; analysis: A
     };
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: STATE_SCHEMA_VERSION,
     athenaVersion: ATHENA_VERSION,
     projectName: analysis.model.name,
     createdAt: prevState?.createdAt ?? now,
@@ -132,8 +134,15 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   }
   const prevState = prev.kind === 'ok' ? prev.state : null;
 
+  // A fresh init builds into a temp directory and swaps it in, so an interrupted
+  // run never leaves a half-written .athena/.
+  const fresh = !(await exists(finalDir));
+  // Create the fingerprint salt up front so the first analysis already uses the
+  // project's stable key (and its cached secret findings stay valid afterwards).
+  const salt = fresh && !opts.dryRun ? crypto.randomBytes(32).toString('hex') : undefined;
+
   opts.onStage?.('analyze');
-  const analysis = await analyzeProject(root, { signal: opts.signal, onStage: (s) => opts.onStage?.(s), reuse: prevState?.fileIndex });
+  const analysis = await analyzeProject(root, { signal: opts.signal, onStage: (s) => opts.onStage?.(s), fingerprintSalt: salt });
   opts.signal?.throwIfAborted();
 
   const adapters = opts.agents ?? (prevState ? ADAPTERS.filter((a) => prevState.agents[a.id]?.configured) : await autoSelectAdapters(root));
@@ -144,9 +153,6 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     return { analysis, docs: [], agentChanges, state: null, notes };
   }
 
-  // A fresh init builds into a temp directory and swaps it in, so an interrupted
-  // run never leaves a half-written .athena/.
-  const fresh = !(await exists(finalDir));
   const workDir = fresh ? path.join(root, `${ATHENA_DIR}.tmp-${crypto.randomBytes(4).toString('hex')}`) : finalDir;
 
   let docs: DocWriteReport[];
@@ -158,12 +164,15 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     docs.push(await ensureRules(workDir, analysis.model));
     await writeFileAtomic(path.join(workDir, 'model.json'), `${JSON.stringify(analysis.model, null, 2)}\n`);
     await ensureGitignoreEntries(path.join(workDir, '.gitignore'));
+    if (salt) await writeFileAtomic(path.join(workDir, LOCAL_CONFIG_FILE), `${JSON.stringify({ salt }, null, 2)}\n`);
     opts.signal?.throwIfAborted();
     if (fresh) await fs.rename(workDir, finalDir);
   } catch (err) {
     if (fresh) await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     throw err;
   }
+
+  await persistAnalysisCache(analysis, finalDir);
 
   opts.onStage?.('agents');
   const agentChanges: PipelineResult['agentChanges'] = [];

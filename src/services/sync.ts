@@ -8,7 +8,7 @@ import { diffModels, type ModelChange } from '../core/impact/model-diff.js';
 import { impactOf } from '../core/impact/impact.js';
 import { ProjectModel } from '../core/model/project-model.js';
 import { headMovement, type CommitSummary } from '../core/git/git.js';
-import { athenaDir, backupCorruptedState, buildFileIndex, diffFileIndex, readState, writeState, type AthenaState } from '../core/state/state.js';
+import { athenaDir, backupCorruptedState, buildFileIndex, diffFileIndex, readFileIndex, readState, writeState, type AthenaState, type FileIndex } from '../core/state/state.js';
 import { readTextIfExists, sha256, writeFileAtomic } from '../core/util/fs.js';
 import { AthenaError, conflict } from './errors.js';
 import { composeState, indexWithIntegrations } from './pipeline.js';
@@ -92,17 +92,18 @@ function countLines(patch: string): { additions: number; deletions: number } {
   return { additions, deletions };
 }
 
-function detectRenames(prev: AthenaState['fileIndex'], next: AthenaState['fileIndex'], added: string[], deleted: string[]): FileChanges {
+function detectRenames(prev: FileIndex, next: FileIndex, added: string[], deleted: string[]): FileChanges {
+  // Keyed by a 16-char prefix: indexes written before state v2 stored truncated hashes.
   const byHash = new Map<string, string[]>();
   for (const d of deleted) {
-    const h = prev[d]?.h;
+    const h = prev[d]?.h.slice(0, 16);
     if (h && !h.startsWith('meta:')) byHash.set(h, [...(byHash.get(h) ?? []), d]);
   }
   const renamed: FileChanges['renamed'] = [];
   const remainingAdded: string[] = [];
   const usedDeleted = new Set<string>();
   for (const a of added) {
-    const candidates = byHash.get(next[a]?.h ?? '')?.filter((d) => !usedDeleted.has(d));
+    const candidates = byHash.get(next[a]?.h.slice(0, 16) ?? '')?.filter((d) => !usedDeleted.has(d));
     if (candidates?.length) {
       usedDeleted.add(candidates[0]!);
       renamed.push({ from: candidates[0]!, to: a });
@@ -153,14 +154,14 @@ export async function planSync(root: string, opts: PlanOptions = {}): Promise<Sy
   const warnings: string[] = [];
   if (st.kind === 'corrupted') warnings.push(`state.json is corrupted (${st.reason}); it will be rebuilt on apply.`);
 
-  const [prevModel, analysis] = await Promise.all([readPreviousModel(dir), analyzeProject(root, { signal: opts.signal, reuse: prevState?.fileIndex })]);
+  const prevIndex = prevState ? await readFileIndex(dir) : {};
+  const [prevModel, analysis] = await Promise.all([readPreviousModel(dir), analyzeProject(root, { signal: opts.signal, reuse: prevIndex })]);
   opts.signal?.throwIfAborted();
 
   const previousBlocks = prevState ? Object.fromEntries(Object.entries(prevState.documents).map(([k, v]) => [k, v.blocks])) : undefined;
   const plans = await planKnowledge(dir, analysis.model, { force: opts.force, previousBlocks });
 
   const nextIndex = buildFileIndex(analysis.files);
-  const prevIndex = prevState?.fileIndex ?? {};
   const rawDiff = diffFileIndex(prevIndex, nextIndex);
   // Agent integration files that Athena manages are tracked by state; don't report them as developer changes.
   const managed = new Set(Object.values(prevState?.agents ?? {}).flatMap((a) => a.files));
