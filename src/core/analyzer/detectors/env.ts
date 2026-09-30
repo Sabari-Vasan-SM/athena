@@ -4,7 +4,8 @@ import type { Detector, FactDef } from '../context.js';
 import { isSecretLikeName } from '../../security/secrets.js';
 
 const TEMPLATE_ENV = /(^|\/)\.env\.(example|sample|template|dist|defaults)$|(^|\/)(example|sample)\.env$/;
-const REAL_ENV_NAMES = ['.env', '.env.local', '.env.development', '.env.production', '.env.test', '.env.development.local', '.env.production.local'];
+/** Local env files whose presence is recorded even when they are gitignored. */
+export const REAL_ENV_NAMES = ['.env', '.env.local', '.env.development', '.env.production', '.env.test', '.env.development.local', '.env.production.local'];
 
 const CODE_REFS: Array<[RegExp, RegExp]> = [
   [/\.(m|c)?(t|j)sx?$/, /\b(?:process\.env|import\.meta\.env)\.([A-Z][A-Z0-9_]{1,})|process\.env\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\]/g],

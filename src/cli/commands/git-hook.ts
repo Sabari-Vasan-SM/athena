@@ -25,7 +25,7 @@ export async function gitHookInstallCommand(opts: GlobalOptions & { review?: boo
     'added-to-existing': `Added Athena's block to your existing ${rel(status)} (${what}); the rest of the hook is unchanged`,
   };
   ui.ok(message[action]);
-  ui.info(ui.dim('Commits are blocked when .athena/ knowledge is out of date. Teammates without Athena installed are not blocked.'));
+  ui.info(ui.dim('Commits are blocked when the staged .athena/ knowledge is out of date for the staged code (untracked and unstaged files are ignored). Teammates without Athena installed are not blocked.'));
   if (!ui.isQuiet()) managerTip();
   return EXIT.OK;
 }
@@ -52,6 +52,7 @@ export async function gitHookStatusCommand(opts: GlobalOptions): Promise<number>
   }
   if (s.installed) {
     ui.ok(`Installed in ${rel(s)} (${s.review ? 'knowledge check + review' : 'knowledge check'}${s.ownsFile ? '' : '; shared with your own hook'})`);
+    if (!s.staged) ui.warn('This hook checks the working tree, so untracked or unstaged files can block commits. Run `athena git-hook install` to check only what is staged.');
   } else {
     ui.line(`Not installed ${ui.dim(`(${rel(s)})`)}`);
     if (s.manager) ui.line(ui.dim(`Hooks here are managed by ${s.manager}: add \`${HOOK_MANAGER_COMMAND}\` to its pre-commit config.`));

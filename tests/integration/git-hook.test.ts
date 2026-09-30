@@ -65,7 +65,7 @@ async function initializedRepo(files: Record<string, string> = {}): Promise<stri
 }
 
 const hookPath = (dir: string) => path.join(dir, '.git', 'hooks', 'pre-commit');
-const status = async (dir: string) => JSON.parse((await runCli(['git-hook', 'status', '--json'], dir)).stdout) as { installed: boolean; review: boolean; ownsFile: boolean; manager: string | null };
+const status = async (dir: string) => JSON.parse((await runCli(['git-hook', 'status', '--json'], dir)).stdout) as { installed: boolean; review: boolean; staged: boolean; ownsFile: boolean; manager: string | null };
 
 describe('athena git-hook', () => {
   it('installs an executable hook, is idempotent, and uninstalls cleanly', async () => {
@@ -79,10 +79,10 @@ describe('athena git-hook', () => {
     const text = await fs.readFile(hookPath(dir), 'utf8');
     expect(text.startsWith('#!/bin/sh\n')).toBe(true);
     expect(text).toContain('# athena:start');
-    expect(text).toContain('athena --no-color sync --check --quiet');
+    expect(text).toContain('athena --no-color sync --check --staged --quiet');
     expect(text).not.toContain(' review ');
     if (!isWin) expect((await fs.stat(hookPath(dir))).mode & 0o111).toBeTruthy();
-    expect(await status(dir)).toMatchObject({ installed: true, review: false, ownsFile: true, manager: null });
+    expect(await status(dir)).toMatchObject({ installed: true, review: false, staged: true, ownsFile: true, manager: null });
 
     const again = JSON.parse((await runCli(['git-hook', 'install', '--json'], dir)).stdout);
     expect(again.action).toBe('unchanged');
@@ -163,7 +163,7 @@ describe.skipIf(isWin)('athena git-hook: commits', () => {
     await fs.appendFile(path.join(dir, 'src/app.ts'), "app.post('/b', h);\n");
     const blocked = await commitAll(dir, 'add route', env);
     expect(blocked.code).toBe(1);
-    expect(blocked.stderr).toContain('commit blocked: .athena/ knowledge is out of date');
+    expect(blocked.stderr).toContain('commit blocked: staged .athena/ knowledge is out of date');
     expect(blocked.stderr).toContain('api.md');
 
     expect((await runCli(['sync', '--yes'], dir)).code).toBe(0);
@@ -208,6 +208,68 @@ describe.skipIf(isWin)('athena git-hook: commits', () => {
     const blocked = await commitAll(dir, 'stale', noAthena);
     expect(blocked.code).toBe(1);
     expect(blocked.stderr).toContain('knowledge is out of date');
+  });
+
+  it('checks what is staged: untracked files and unstaged edits never block, staged code changes do', async () => {
+    const dir = await initializedRepo({ '.gitignore': '.env.local\n' });
+    expect((await runCli(['git-hook', 'install'], dir)).code).toBe(0);
+    const env = { PATH: withShim() };
+
+    // Untracked files (a new route, a local .env and a gitignored .env.local) and an unstaged
+    // edit of a tracked file would all change the knowledge — none of them is being committed.
+    await fs.writeFile(path.join(dir, 'src/scratch.ts'), "app.post('/scratch', h);\nprocess.env.SCRATCH_TOKEN;\n");
+    await fs.writeFile(path.join(dir, '.env'), 'SCRATCH_TOKEN=x\n');
+    await fs.writeFile(path.join(dir, '.env.local'), 'X=1\n');
+    await fs.appendFile(path.join(dir, 'src/app.ts'), "app.delete('/unstaged', h);\n");
+    await fs.writeFile(path.join(dir, 'README.md'), '# shop\n');
+    expect((await runCli(['sync', '--check', '--quiet'], dir)).code).toBe(1); // the working tree is out of date
+    await git(dir, ['add', 'README.md']);
+    const ok = await git(dir, ['commit', '-q', '--no-gpg-sign', '-m', 'readme'], env);
+    expect(ok.code, ok.stderr).toBe(0);
+    expect(ok.stderr).not.toContain('athena:');
+
+    // A staged route makes the staged knowledge stale; the unstaged edit and untracked files still don't count.
+    await fs.writeFile(path.join(dir, 'src/orders.ts'), "import express from 'express';\nconst app = express();\napp.post('/orders', h);\n");
+    await git(dir, ['add', 'src/orders.ts']);
+    const blocked = await git(dir, ['commit', '-q', '--no-gpg-sign', '-m', 'orders'], env);
+    expect(blocked.code).toBe(1);
+    expect(blocked.stderr).toContain('commit blocked: staged .athena/ knowledge is out of date');
+    expect(blocked.stderr).toContain('api.md');
+    const json = JSON.parse((await runCli(['sync', '--check', '--staged', '--json'], dir)).stdout) as { inSync: boolean; stale: string[]; documents: Array<{ file: string; syncedButUnstaged: boolean }> };
+    expect(json.inSync).toBe(false);
+    expect(json.stale).toContain('api.md');
+
+    // Sync the knowledge for exactly what is staged (stash the rest), stage it: the commit goes through.
+    await git(dir, ['stash', 'push', '-q', '--keep-index', '--include-untracked']);
+    expect((await runCli(['sync', '--yes', '--quiet'], dir)).code).toBe(0);
+    const unstaged = JSON.parse((await runCli(['sync', '--check', '--staged', '--json'], dir)).stdout) as typeof json;
+    expect(unstaged.inSync).toBe(false);
+    expect(unstaged.documents.find((d) => d.file === 'api.md')?.syncedButUnstaged).toBe(true);
+    await git(dir, ['stash', 'pop', '-q']);
+    await git(dir, ['add', '.athena']);
+    const committed = await git(dir, ['commit', '-q', '--no-gpg-sign', '-m', 'orders'], env);
+    expect(committed.code, committed.stderr).toBe(0);
+    expect(await fs.readFile(path.join(dir, 'src/scratch.ts'), 'utf8')).toContain('/scratch'); // untouched
+
+    // A staged change that is reverted in the working tree still counts (the commit would contain it).
+    await fs.appendFile(path.join(dir, 'src/orders.ts'), "app.put('/orders/:id', h);\n");
+    await git(dir, ['add', 'src/orders.ts']);
+    await git(dir, ['checkout', '--', 'src/orders.ts']);
+    expect((await runCli(['sync', '--check', '--staged', '--quiet'], dir)).code).toBe(1);
+    await git(dir, ['reset', '-q', 'src/orders.ts']);
+    expect((await runCli(['sync', '--check', '--staged', '--quiet'], dir)).code).toBe(0);
+  });
+
+  it('updates an older hook that checked the working tree', async () => {
+    const dir = await initializedRepo();
+    const old = ['#!/bin/sh', '', '# athena:start (added by `athena git-hook install`; remove with `athena git-hook uninstall`)', 'athena sync --check --quiet', '# athena:end', ''].join('\n');
+    await fs.mkdir(path.dirname(hookPath(dir)), { recursive: true });
+    await fs.writeFile(hookPath(dir), old, { mode: 0o755 });
+    expect(await status(dir)).toMatchObject({ installed: true, staged: false });
+    expect((await runCli(['git-hook', 'status'], dir)).stdout).toContain('Run `athena git-hook install` to check only what is staged');
+    const r = JSON.parse((await runCli(['git-hook', 'install', '--json'], dir)).stdout) as { action: string; staged: boolean };
+    expect(r).toMatchObject({ action: 'updated', staged: true });
+    expect((await fs.readFile(hookPath(dir), 'utf8')).match(/# athena:start/g)).toHaveLength(1);
   });
 
   it('runs Athena in a project inside a subdirectory of the repository', async () => {
