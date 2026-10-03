@@ -139,6 +139,74 @@ export function buildProgram(): Command {
     .option('--unrated <policy>', 'With --fail-on: "fail" (default) also fails on findings the tool did not rate (pip-audit, govulncheck); "warn" only reports them', 'fail')
     .action(run(async (o: { audit?: boolean; failOn?: string; last?: boolean; unrated?: string }, cmd: Command) => (await import('./commands/security.js')).securityCommand({ ...globals(cmd), noAudit: o.audit === false, failOn: o.failOn, unrated: o.unrated, last: o.last, signal: controller.signal })));
 
+  const scanCmds = () => import('./commands/scan.js');
+  program
+    .command('scan')
+    .description('Scan for secrets, vulnerable dependencies and review issues; apply the policy, baseline and triage; evaluate the quality gate')
+    .option('--only <scanners>', 'Comma-separated: secrets, deps, review (default: secrets,deps; plus review when scanning a change)')
+    .option('--base <ref>', 'Scan the changes since this ref (merge-base..HEAD, like a pull request)')
+    .option('--staged', 'Scan what is staged for commit')
+    .option('--changed', 'Scan working-tree changes')
+    .option('-f, --format <format>', 'text, json, markdown, github or sarif')
+    .option('-o, --output <file>', 'Write the report to a file')
+    .option('--fail-on <severity>', 'Override the gate threshold: critical, high, medium, low, info')
+    .option('--min-confidence <level>', 'Override the gate confidence: high, medium, low')
+    .option('--unrated <policy>', 'Override how unrated findings affect the gate: fail or warn')
+    .option('--no-baseline', 'Ignore .athena/baseline.json (every finding counts as new)')
+    .option('--policy-from <ref>', 'Use the policy, baseline and triage committed at this ref, and report changes to them (CI)')
+    .option('--offline', 'Do not contact the network (dependency audits are skipped and reported as skipped)')
+    .option('--no-fail', 'Always exit 0, even when the gate fails')
+    .option('--list-rules', 'List the rules Athena knows and exit')
+    .action(run(async (o: { only?: string; base?: string; staged?: boolean; changed?: boolean; format?: string; output?: string; failOn?: string; minConfidence?: string; unrated?: string; baseline?: boolean; policyFrom?: string; offline?: boolean; fail?: boolean; listRules?: boolean }, cmd: Command) =>
+      (await scanCmds()).scanCommand({ ...globals(cmd), ...o, noBaseline: o.baseline === false, noFail: o.fail === false, signal: controller.signal }),
+    ));
+
+  program
+    .command('explain <ruleId>')
+    .description('Explain a rule: what it detects, why it matters and what to do')
+    .action(run(async (ruleId: string, _o: unknown, cmd: Command) => (await scanCmds()).explainCommand(ruleId, globals(cmd))));
+
+  const baseline = program.command('baseline').description('Record existing findings so only new ones fail the gate (.athena/baseline.json)');
+  baseline.command('show', { isDefault: true }).description('Summarize the baseline').action(run(async (_o: unknown, cmd: Command) => (await scanCmds()).baselineShowCommand(globals(cmd))));
+  baseline
+    .command('create')
+    .description('Scan the whole project and baseline every current finding')
+    .option('--reason <text>', 'Why these findings are accepted for now')
+    .option('--last', 'Use the last full scan instead of scanning again')
+    .option('--offline', 'Do not contact the network')
+    .option('--force', 'Add to an existing baseline')
+    .action(run(async (o: { reason?: string; last?: boolean; offline?: boolean; force?: boolean }, cmd: Command) => (await scanCmds()).baselineCreateCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+  baseline
+    .command('update')
+    .description('Add findings that are not in the baseline yet')
+    .option('--reason <text>', 'Why these findings are accepted for now')
+    .option('--last', 'Use the last full scan instead of scanning again')
+    .option('--offline', 'Do not contact the network')
+    .action(run(async (o: { reason?: string; last?: boolean; offline?: boolean }, cmd: Command) => (await scanCmds()).baselineCreateCommand({ ...globals(cmd), ...o, update: true, signal: controller.signal })));
+  baseline
+    .command('prune')
+    .description('Remove entries a full scan no longer reports')
+    .option('--last', 'Use the last full scan instead of scanning again')
+    .option('--offline', 'Do not contact the network')
+    .action(run(async (o: { last?: boolean; offline?: boolean }, cmd: Command) => (await scanCmds()).baselinePruneCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+
+  const findings = program.command('findings').description('Inspect and triage findings from the last scan');
+  findings
+    .command('list', { isDefault: true })
+    .description('List active findings with their fingerprints')
+    .option('--status <status>', 'open, baselined, suppressed, excluded, triaged, or a triage decision such as to-review')
+    .option('--severity <severity>', 'Only this severity')
+    .option('--category <category>', 'Only this category')
+    .option('--all', 'Include baselined, suppressed, triaged and excluded findings')
+    .action(run(async (o: { status?: string; severity?: string; category?: string; all?: boolean }, cmd: Command) => (await scanCmds()).findingsListCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+  findings.command('show <fingerprint>').description('Show one finding (a fingerprint prefix of 6+ characters is enough)').action(run(async (fp: string, _o: unknown, cmd: Command) => (await scanCmds()).findingsShowCommand(fp, { ...globals(cmd), signal: controller.signal })));
+  findings
+    .command('triage <fingerprint> <status>')
+    .description('Record a review decision: safe, false-positive, accepted-risk, fixed, to-review (or "clear")')
+    .option('--reason <text>', 'Why (required; committed in .athena/triage.json)')
+    .option('--by <name>', 'Who decided')
+    .action(run(async (fp: string, status: string, o: { reason?: string; by?: string }, cmd: Command) => (await scanCmds()).findingsTriageCommand(fp, status, { ...globals(cmd), ...o, signal: controller.signal })));
+
   program
     .command('review')
     .description('Check the current diff for facts worth reviewing, and list the project rules and checklist')

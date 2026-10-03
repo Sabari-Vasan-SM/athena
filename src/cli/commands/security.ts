@@ -1,7 +1,7 @@
 import type { ProjectModel } from '../../core/model/project-model.js';
 import { analyzeProject } from '../../core/analyzer/analyze.js';
 import { projectSession } from '../../services/project-session.js';
-import { meetsThreshold, RATED_SEVERITIES, runSecurityScan, saveScan, SEVERITY_ORDER, unratedFindings, type SecurityScan, type Severity } from '../../services/security.js';
+import { meetsThreshold, RATED_SEVERITIES, runSecurityScanWithFindings, saveScan, SEVERITY_ORDER, unratedFindings, type SecurityScan, type Severity } from '../../services/security.js';
 import { AthenaError, EXIT } from '../../services/errors.js';
 import { requireProjectRoot, type GlobalOptions } from '../context.js';
 import * as ui from '../ui/term.js';
@@ -110,15 +110,18 @@ export async function securityCommand(opts: SecurityOptions): Promise<number> {
     try {
       model = await loadModel(root, opts.signal);
       sp.update('Scanning files for secrets...');
-      scan = await runSecurityScan(root, model, { signal: opts.signal, skipAudit: opts.noAudit, onTool: (tool) => sp.update(`Running ${tool}...`) });
+      scan = (await runSecurityScanWithFindings(root, model, { signal: opts.signal, skipAudit: opts.noAudit, onTool: (tool) => sp.update(`Running ${tool}...`) })).scan;
       sp.succeed(`Security scan finished in ${(scan.durationMs / 1000).toFixed(1)}s`);
     } catch (err) {
       sp.stop();
       throw err;
     }
+    // Writes the legacy security-scan.json (web UI, security.md) and .athena/findings.json.
     await saveScan(root, scan);
   }
 
+  // `--json` keeps the v1 security-scan.json shape for compatibility. The unified
+  // findings shape is in .athena/findings.json (and `athena scan --format json`).
   if (ui.isJson()) ui.json(scan);
   else {
     ui.heading('Athena Security');

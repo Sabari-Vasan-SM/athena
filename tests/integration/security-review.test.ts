@@ -205,6 +205,22 @@ describe('CLI', () => {
     expect(bad.stderr).toContain('Invalid --fail-on');
   }, 120_000);
 
+  it('athena security writes findings.json beside the legacy scan, without secret values', async () => {
+    const dir = await project({ 'src/keys.ts': `export const k = "${FAKE.stripe}";\n` });
+    const run = await runCli(['security', '--no-audit', '--json'], dir);
+    expect(run.code, run.stderr).toBe(0);
+    expect(JSON.parse(run.stdout)).toHaveProperty('secrets.count', 1); // --json keeps the v1 shape
+    const legacy = JSON.parse(await fs.readFile(path.join(dir, '.athena/security-scan.json'), 'utf8'));
+    expect(legacy.secrets.count).toBe(1);
+    const raw = await fs.readFile(path.join(dir, '.athena/findings.json'), 'utf8');
+    expect(raw).not.toContain(FAKE.stripe);
+    const result = JSON.parse(raw);
+    expect(result.schemaVersion).toBe(1);
+    expect(result.findings).toEqual([expect.objectContaining({ ruleId: 'secret/stripe-key', severity: 'high', location: expect.objectContaining({ file: 'src/keys.ts', startLine: 1 }) })]);
+    expect(result.coverage.map((c: { engine: string }) => c.engine)).toEqual(['athena-secrets']);
+    expect(await fs.readFile(path.join(dir, '.athena/.gitignore'), 'utf8')).toContain('findings.json');
+  }, 120_000);
+
   it('athena security --fail-on fails on unrated findings unless --unrated warn', async () => {
     const dir = await project();
     await saveScan(dir, fakeScan({
@@ -234,6 +250,14 @@ describe('CLI', () => {
     expect(dirty.code).toBe(1);
     expect(dirty.stdout).toContain('blocker');
     expect(dirty.stdout).not.toContain(FAKE.github);
+
+    const json = await runCli(['review', '--no-sync', '--json'], dir);
+    expect(json.code).toBe(1);
+    const parsed = JSON.parse(json.stdout);
+    expect(parsed.findings.some((f: { check: string }) => f.check === 'secrets')).toBe(true); // legacy list kept
+    expect(parsed.scan.scope.mode).toBe('changed');
+    expect(parsed.scan.findings).toContainEqual(expect.objectContaining({ ruleId: 'secret/github-token', category: 'secret', location: expect.objectContaining({ file: 'src/leak.ts', startLine: 1 }) }));
+    expect(json.stdout).not.toContain(FAKE.github);
 
     const forgiving = await runCli(['review', '--no-sync', '--no-fail'], dir);
     expect(forgiving.code).toBe(0);

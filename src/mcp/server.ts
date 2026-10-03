@@ -16,6 +16,9 @@ import { redact } from '../core/security/secrets.js';
 import { MEMORY_KINDS, MEMORY_STATUSES, recall, type MemoryView, type RecallHit } from '../core/memory/memory.js';
 import { addMemory, listMemory } from '../services/memory.js';
 import { AthenaError } from '../services/errors.js';
+import { loadFindings } from '../core/findings/store.js';
+import { evaluateFindings } from '../services/findings.js';
+import { CATEGORIES } from '../core/findings/finding.js';
 
 /**
  * MCP server exposing Athena's project intelligence to any MCP-capable agent.
@@ -164,6 +167,35 @@ export function createMcpServer(opts: McpOptions): McpServer {
       const scan = await loadScan(root);
       const suffix = scan ? `\n\n_Last dependency scan: ${scan.scannedAt}._` : '\n\n_No dependency audit has been run (`athena security`)._';
       return textResult(await docText(root, 'security.md', suffix));
+    },
+  );
+
+  server.registerTool(
+    'findings',
+    {
+      title: 'Security findings',
+      description:
+        'Summary of the last `athena scan`: gate verdict, ratings, coverage gaps and active findings (rule, severity, confidence, location — never secret values). Read-only; it does not run a scan. Heuristic findings are marked potential: verify before acting.',
+      inputSchema: { category: z.enum(CATEGORIES).optional(), limit: z.number().int().min(1).max(100).optional() },
+    },
+    async ({ category, limit }) => {
+      const result = await loadFindings(root);
+      if (!result) return textResult('No scan results yet. Ask the developer to run `athena scan` (Athena does not scan from MCP).');
+      const ev = await evaluateFindings(root, result);
+      const active = ev.findings.filter((f) => ev.statuses[f.fingerprint]?.active && (!category || f.category === category));
+      const max = limit ?? 30;
+      const where = (f: (typeof active)[number]) => (f.location ? ` ${f.location.file}${f.location.startLine ? `:${f.location.startLine}` : ''}` : f.package ? ` ${f.package.name}${f.package.version ? `@${f.package.version}` : ''}` : '');
+      const gaps = result.coverage.filter((c) => c.status !== 'ok');
+      const lines = [
+        `Last scan: ${result.scannedAt} (scope ${result.scope.mode}${result.scope.base ? ` vs ${result.scope.base}` : ''}).`,
+        `Gate: ${ev.gate.passed ? 'passed' : `failed — ${ev.gate.reasons.join('; ')}`}`,
+        `Ratings: ${ev.ratings.map((r) => `${r.category} ${r.rating ?? 'not scanned'}`).join(', ')}`,
+        ...(gaps.length ? [`Not fully covered: ${gaps.map((c) => `${c.engine} (${c.category}) ${c.status}`).join(', ')}`] : []),
+        '',
+        `Active findings${category ? ` (${category})` : ''}: ${active.length}${active.length > max ? ` (first ${max})` : ''}`,
+        ...active.slice(0, max).map((f) => `- [${f.severity}/${f.confidence}] ${f.potential ? 'Potential: ' : ''}${f.title} —${where(f)} (${f.ruleId}, ${f.label}, fp ${f.fingerprint.slice(0, 12)})`),
+      ];
+      return textResult(untrustedDocument('.athena/findings.json', lines.join('\n')));
     },
   );
 

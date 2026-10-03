@@ -4,6 +4,10 @@ import { git, GitCommandError, gitOrThrow, isSafeRef, parseNameStatusZ, workingC
 import { manifestDependencyNames } from '../core/analyzer/detectors/manifests.js';
 import { listRules, parseRules, type Rule } from '../core/knowledge/rules.js';
 import { scanText } from '../core/security/secrets.js';
+import { Coverage, dedupeFindings, Finding, type ScanResult } from '../core/findings/finding.js';
+import { hitsFromMatches, type SecretHit } from '../core/scanners/secrets.js';
+import { reviewCoverage, reviewFindings, reviewScanner, type ReviewLocation } from '../core/scanners/review.js';
+import type { Scanner } from '../core/scanners/types.js';
 import { athenaDir } from '../core/state/state.js';
 import { readTextIfExists, readTextInsideRoot } from '../core/util/fs.js';
 import { AthenaError, EXIT } from './errors.js';
@@ -44,6 +48,12 @@ export interface ReviewResult {
   /** True when some changed files could not be checked (see `skipped`). */
   incomplete: boolean;
   skipped: SkippedFile[];
+  /**
+   * The same checks as unified findings (`review/<check>`, and `secret/*` at the exact
+   * added line instead of the `secrets` check), with coverage. `findings` above keeps
+   * the original check list for compatibility.
+   */
+  scan: ScanResult;
 }
 
 const ENV_FILE = /(^|\/)\.env(\.(local|production|development|prod|dev|staging))?$/;
@@ -141,15 +151,25 @@ export function addedLines(patch: string): AddedLine[] {
  * at the real line where it starts. Values are never returned.
  */
 export function scanAddedLines(lines: AddedLine[]): Array<{ type: string; file: string; line: number }> {
-  const hits: Array<{ type: string; file: string; line: number }> = [];
+  return scanAddedLinesDetailed(lines).map((h) => ({ type: h.type, file: h.file, line: h.line }));
+}
+
+/**
+ * Like scanAddedLines, with the column, the line's text and the matched span (for
+ * masked fingerprints). The text stays in memory: it is never part of a result.
+ */
+export function scanAddedLinesDetailed(lines: AddedLine[]): SecretHit[] {
+  const hits: SecretHit[] = [];
   let block: AddedLine[] = [];
   const flush = () => {
     if (!block.length) return;
     const b = block;
     block = [];
-    for (const m of scanText(b.map((l) => l.text).join('\n'))) {
-      const at = b[m.line - 1] ?? b[0]!;
-      hits.push({ type: m.type, file: at.file, line: at.line });
+    const text = b.map((l) => l.text).join('\n');
+    for (const h of hitsFromMatches('', text, scanText(text))) {
+      const at = b[h.line - 1] ?? b[0]!;
+      const endAt = h.endLine ? b[h.endLine - 1] : undefined;
+      hits.push({ ...h, file: at.file, line: at.line, ...(endAt ? { endLine: endAt.line } : {}) });
     }
   };
   for (const l of lines) {
@@ -196,6 +216,7 @@ export async function reviewChanges(root: string, opts: ReviewOptions = {}): Pro
 }
 
 async function review(root: string, opts: ReviewOptions): Promise<ReviewResult> {
+  const started = Date.now();
   const signal = opts.signal;
   signal?.throwIfAborted();
   const repoCheck = await git(root, ['rev-parse', '--is-inside-work-tree'], { signal });
@@ -316,11 +337,17 @@ async function review(root: string, opts: ReviewOptions): Promise<ReviewResult> 
 
   const findings: ReviewFinding[] = [];
   const paths = changedFiles.map((f) => f.path);
-  const add = (f: ReviewFinding) => findings.push(f);
+  /** Every location a check covers (its `files` list is capped for display). */
+  const locations = new Map<ReviewFinding, ReviewLocation[]>();
+  const add = (f: ReviewFinding, all?: Array<string | ReviewLocation>) => {
+    findings.push(f);
+    locations.set(f, (all ?? f.files).map((x) => (typeof x === 'string' ? { file: x } : x)));
+  };
 
   // 1. Secrets in added lines — the only blocker Athena raises on its own.
+  const secretDetail = scanAddedLinesDetailed(added);
   const secretHits = new Map<string, Set<string>>();
-  for (const hit of scanAddedLines(added)) {
+  for (const hit of secretDetail) {
     if (!secretHits.has(hit.type)) secretHits.set(hit.type, new Set());
     secretHits.get(hit.type)!.add(`${hit.file}:${hit.line}`);
   }
@@ -357,16 +384,16 @@ async function review(root: string, opts: ReviewOptions): Promise<ReviewResult> 
   const changedSource = paths.filter((p) => SOURCE_FILE.test(p) && !TEST_FILE.test(p));
   const changedTests = paths.filter((p) => TEST_FILE.test(p));
   if (changedSource.length && !changedTests.length) {
-    add({ level: 'warning', check: 'tests', message: `${changedSource.length} source file(s) changed with no test file changes`, files: changedSource.slice(0, 10), hint: 'See `.athena/testing.md` for the project test commands and layout.' });
+    add({ level: 'warning', check: 'tests', message: `${changedSource.length} source file(s) changed with no test file changes`, files: changedSource.slice(0, 10), hint: 'See `.athena/testing.md` for the project test commands and layout.' }, changedSource);
   }
 
   // 5. Routes / schema / auth touchpoints
   const routeFiles = changedSource.filter((p) => API_ROUTE_PATH.test(p));
-  if (routeFiles.length) add({ level: 'info', check: 'api', message: 'API surface changed', files: routeFiles.slice(0, 10), hint: 'Check auth/authorization and error handling (`.athena/api.md`, `.athena/auth.md`).' });
+  if (routeFiles.length) add({ level: 'info', check: 'api', message: 'API surface changed', files: routeFiles.slice(0, 10), hint: 'Check auth/authorization and error handling (`.athena/api.md`, `.athena/auth.md`).' }, routeFiles);
   const schemaFiles = paths.filter((p) => SCHEMA_PATH.test(p));
-  if (schemaFiles.length) add({ level: 'info', check: 'database', message: 'Database schema or migrations changed', files: schemaFiles.slice(0, 10), hint: 'Check indexes, constraints and backward compatibility (`.athena/database.md`).' });
+  if (schemaFiles.length) add({ level: 'info', check: 'database', message: 'Database schema or migrations changed', files: schemaFiles.slice(0, 10), hint: 'Check indexes, constraints and backward compatibility (`.athena/database.md`).' }, schemaFiles);
   const authFiles = changedSource.filter((p) => AUTH_PATH.test(p));
-  if (authFiles.length) add({ level: 'warning', check: 'auth', message: 'Authentication/authorization code changed', files: authFiles.slice(0, 10), hint: 'Review against `.athena/auth.md` and `.athena/security.md`.' });
+  if (authFiles.length) add({ level: 'warning', check: 'auth', message: 'Authentication/authorization code changed', files: authFiles.slice(0, 10), hint: 'Review against `.athena/auth.md` and `.athena/security.md`.' }, authFiles);
 
   // 6. Large added files
   for (const f of changedFiles.filter((x) => x.status === 'added')) {
@@ -386,14 +413,14 @@ async function review(root: string, opts: ReviewOptions): Promise<ReviewResult> 
   // 7. Debug leftovers in added lines
   const debugHits = added.filter((l) => /\b(TODO|FIXME|XXX|console\.log|debugger|print\(|binding\.pry|dd\()/.test(l.text) && SOURCE_FILE.test(l.file));
   if (debugHits.length) {
-    add({ level: 'info', check: 'leftovers', message: `${debugHits.length} added line(s) contain TODO/FIXME or debug statements`, files: [...new Set(debugHits.map((l) => `${l.file}:${l.line}`))].slice(0, 10) });
+    add({ level: 'info', check: 'leftovers', message: `${debugHits.length} added line(s) contain TODO/FIXME or debug statements`, files: [...new Set(debugHits.map((l) => `${l.file}:${l.line}`))].slice(0, 10) }, debugHits.map((l) => ({ file: l.file, line: l.line })));
   }
 
   // 8. Known vulnerable dependencies from the last scan
-  const scan = await loadScan(root);
-  if (scan) {
-    const vulnerable = scan.tools.flatMap((t) => t.findings).filter((f) => ['critical', 'high'].includes(f.severity));
-    if (vulnerable.length) add({ level: 'warning', check: 'vulnerabilities', message: `${vulnerable.length} high/critical dependency advisor${vulnerable.length === 1 ? 'y' : 'ies'} from the last scan (${scan.scannedAt.slice(0, 10)})`, files: [], hint: 'Run `athena security` for details.' });
+  const lastScan = await loadScan(root);
+  if (lastScan) {
+    const vulnerable = lastScan.tools.flatMap((t) => t.findings).filter((f) => ['critical', 'high'].includes(f.severity));
+    if (vulnerable.length) add({ level: 'warning', check: 'vulnerabilities', message: `${vulnerable.length} high/critical dependency advisor${vulnerable.length === 1 ? 'y' : 'ies'} from the last scan (${lastScan.scannedAt.slice(0, 10)})`, files: [], hint: 'Run `athena security` for details.' });
   }
 
   // 9. Knowledge freshness
@@ -411,10 +438,34 @@ async function review(root: string, opts: ReviewOptions): Promise<ReviewResult> 
     : [];
 
   if (skipped.length) {
-    add({ level: 'warning', check: 'skipped', message: `${skipped.length} changed file${skipped.length === 1 ? ' was' : 's were'} not checked`, files: skipped.map((s) => `${s.path} (${SKIP_REASON[s.reason]})`).slice(0, 10), hint: 'Athena could not read these files, so their contents were not checked for secrets. Check them yourself.' });
+    add({ level: 'warning', check: 'skipped', message: `${skipped.length} changed file${skipped.length === 1 ? ' was' : 's were'} not checked`, files: skipped.map((s) => `${s.path} (${SKIP_REASON[s.reason]})`).slice(0, 10), hint: 'Athena could not read these files, so their contents were not checked for secrets. Check them yourself.' }, skipped.map((s) => s.path));
   }
 
-  return { base, mode, ...(mergeBase ? { mergeBase } : {}), changedFiles, findings, rules, checklist, knowledgeInSync, stats: { added: addedCount + untrackedAdded, removed: removedCount, files: changedFiles.length }, incomplete: skipped.length > 0, skipped };
+  const durationMs = Date.now() - started;
+  const tooLarge = skipped.filter((s) => s.reason === 'too-large').length;
+  const scan: ScanResult = {
+    schemaVersion: 1,
+    scannedAt: new Date().toISOString(),
+    durationMs,
+    scope: { mode: mode === 'working' ? 'changed' : mode, ...(opts.base !== undefined ? { base: opts.base } : {}), files: changedFiles.length },
+    findings: dedupeFindings(reviewFindings({ checks: findings.map((check) => ({ check, locations: locations.get(check) ?? [] })), secrets: secretDetail }).map((f) => Finding.parse(f))),
+    coverage: reviewCoverage({ checked: changedFiles.filter((f) => f.status !== 'deleted').length - skipped.length, skipped: { tooLarge, unreadable: skipped.length - tooLarge }, durationMs, incomplete: skipped.length > 0 }).map((c) => Coverage.parse(c)),
+  };
+
+  return { base, mode, ...(mergeBase ? { mergeBase } : {}), changedFiles, findings, rules, checklist, knowledgeInSync, stats: { added: addedCount + untrackedAdded, removed: removedCount, files: changedFiles.length }, incomplete: skipped.length > 0, skipped, scan };
+}
+
+/**
+ * The review checks as a scanner for `runScanners`: scope `staged` reviews the index,
+ * `base` the commits since `ctx.base`, `changed` the working tree. Scope `all` is
+ * skipped (there is no diff). A review that cannot run (no Git, unknown base) throws,
+ * which runScanners records as `failed` coverage.
+ */
+export function createReviewScanner(opts: Pick<ReviewOptions, 'checkSync' | 'maxDiffBytes'> = {}): Scanner {
+  return reviewScanner(async (ctx) => {
+    const r = await reviewChanges(ctx.root, { ...opts, signal: ctx.signal, ...(ctx.mode === 'staged' ? { staged: true } : {}), ...(ctx.mode === 'base' ? { base: ctx.base ?? 'HEAD' } : {}) });
+    return { findings: r.scan.findings, coverage: r.scan.coverage };
+  });
 }
 
 const SKIP_REASON: Record<SkippedFile['reason'], string> = {
