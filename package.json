@@ -1,6 +1,6 @@
 {
   "name": "project-athena",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Athena — local-first project intelligence layer for AI coding agents",
   "author": "Sabarivasan",
   "license": "MIT",
