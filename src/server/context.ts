@@ -28,6 +28,8 @@ export interface ServerContext {
   readonly session: ProjectSession;
   /** file → content hash written by this server, to tell our own writes from external edits. */
   readonly recentWrites: Map<string, string>;
+  /** Memory writes from the web UI still in progress; the memory watcher waits for them before deciding a change is external. */
+  readonly memoryWrites: { inFlight: number };
   readonly state: ServerState;
   /** Single-flight, coalescing planner for this project (shared with the file watcher). */
   readonly scheduler: AnalysisScheduler;
@@ -57,6 +59,7 @@ export function createServerContext(init: { app: FastifyInstance; root: string; 
     ...init,
     session: projectSession(root),
     recentWrites: new Map(),
+    memoryWrites: { inFlight: 0 },
     state,
     scheduler: new AnalysisScheduler(root),
     async getStatus() {

@@ -55,12 +55,25 @@ export function memoryCounts(entries: MemoryView[]): MemoryCounts {
 }
 
 /** Project memory (`.athena/memory/*.md`): list, review (confirm/supersede/edit/forget) and developer add. */
-export function registerMemoryRoutes({ app, root, events, recentWrites }: ServerContext): void {
+export function registerMemoryRoutes({ app, root, events, recentWrites, memoryWrites }: ServerContext): void {
   /** Remember what we wrote so the watcher doesn't report our own writes as external. */
   const recordWrites = async () => {
     for (const file of Object.values(MEMORY_FILES)) {
       const text = await fs.readFile(path.join(memoryDir(root), file), 'utf8').catch(() => null);
       if (text !== null) recentWrites.set(memoryWriteKey(file), contentHash(text));
+    }
+  };
+  /**
+   * Run a memory write and record its result before the watcher may look at it: on a
+   * slow machine the watcher's debounce can fire before the write returns.
+   */
+  const own = async <T>(write: () => Promise<T>): Promise<T> => {
+    memoryWrites.inFlight++;
+    try {
+      return await write();
+    } finally {
+      await recordWrites().catch(() => {});
+      memoryWrites.inFlight--;
     }
   };
   const changed = async (action: string, id: string, message: string) => {
@@ -102,14 +115,14 @@ export function registerMemoryRoutes({ app, root, events, recentWrites }: Server
       },
     },
     async (req, reply) => {
-      const entry = await addMemory(root, req.body, 'developer');
+      const entry = await own(() => addMemory(root, req.body, 'developer'));
       await changed('add', entry.id, `Added memory: ${entry.title}`);
       return reply.code(201).send(entry);
     },
   );
 
   app.post<{ Params: { id: string } }>('/api/memory/:id/confirm', { schema: { params: idParams } }, async (req) => {
-    const entry = await confirmMemory(root, req.params.id);
+    const entry = await own(() => confirmMemory(root, req.params.id));
     await changed('confirm', entry.id, `Confirmed memory: ${entry.title}`);
     return entry;
   });
@@ -123,7 +136,7 @@ export function registerMemoryRoutes({ app, root, events, recentWrites }: Server
       await getMemory(root, id);
       // An unknown replacement is a bad request, not a missing resource.
       if (id !== by && !(await listMemory(root)).some((e) => e.id === by)) throw new AthenaError(`Cannot supersede ${id}: no memory with id ${by}.`);
-      const entry = await supersedeMemory(root, id, by);
+      const entry = await own(() => supersedeMemory(root, id, by));
       await changed('supersede', entry.id, `Memory ${id} superseded by ${by}`);
       return entry;
     },
@@ -133,14 +146,14 @@ export function registerMemoryRoutes({ app, root, events, recentWrites }: Server
     '/api/memory/:id',
     { schema: { params: idParams, body: { type: 'object', minProperties: 1, additionalProperties: false, properties: fields } } },
     async (req) => {
-      const entry = await updateMemory(root, req.params.id, req.body);
+      const entry = await own(() => updateMemory(root, req.params.id, req.body));
       await changed('edit', entry.id, `Edited memory: ${entry.title}`);
       return entry;
     },
   );
 
   app.delete<{ Params: { id: string } }>('/api/memory/:id', { schema: { params: idParams } }, async (req) => {
-    await forgetMemory(root, req.params.id);
+    await own(() => forgetMemory(root, req.params.id));
     await changed('forget', req.params.id, `Forgot memory ${req.params.id}`);
     return { ok: true };
   });

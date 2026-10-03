@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `athena open`: a memory edit made in the web UI could, on a slow machine, also be reported as an external change ("changed on disk"). The memory watcher now waits for the UI's own write to be recorded.
+
 ## 0.5.0 — 2026-10-03
 
 Unified findings: every security check (secrets, dependency audits, review checks) now reports into one findings model with value-free fingerprints, an honest coverage record, and a quality gate driven by an optional committed policy, baseline and triage. New `athena scan` writes text, JSON, Markdown, GitHub annotations or SARIF 2.1.0 for code scanning, and `--policy-from <base>` keeps a pull request from quietly weakening the gate. Static analysis rules arrive in 0.6.0; until then reports say plainly that SAST and IaC are not covered.

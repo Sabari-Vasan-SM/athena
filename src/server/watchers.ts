@@ -79,6 +79,8 @@ export function watchMemoryDir(ctx: ServerContext, debounceMs = 150): () => void
       name,
       setTimeout(async () => {
         pending.delete(name);
+        // A write from the web UI is still being recorded: look again once it has been.
+        if (ctx.memoryWrites.inFlight > 0 && !stopped) return onChange(name);
         const text = await fs.readFile(path.join(dir, name), 'utf8').catch(() => null);
         const hash = text === null ? null : contentHash(text);
         const key = memoryWriteKey(name);
