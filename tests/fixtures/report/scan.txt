@@ -1,0 +1,58 @@
+Athena scan — changed vs main (8 files) · 2026-10-01T12:00:00.000Z
+
+Open findings: 4 (1 critical · 1 high · 1 unrated · 1 medium) · 1 potential (heuristic, check them)
+Not counted: 1 baselined · 1 suppressed · 1 triaged
+
+CRITICAL
+  secret
+    CRITICAL Stripe secret key in source  src/pay.ts:12
+             A Stripe secret key appears in source. Rotate it.
+             secret/stripe-key · DETECTED · athena (+gitleaks)
+
+HIGH
+  dependency
+    HIGH     lodash 4.17.20 has a known vulnerability  package-lock.json (lodash@4.17.20)
+             Command injection in lodash (GHSA-35jh-r3h4-6jhm). Fixed in 4.17.21.
+             dependency/vulnerable-package · FACT · npm-audit
+  secret
+    HIGH     JSON Web Token in source  tests/fixtures/token.ts:1  [suppressed]
+             secret/jwt · DETECTED · athena
+
+UNRATED
+  secret
+    UNRATED  Potential hardcoded secret-like assignment  config/app.ts:3
+             A high-entropy value is assigned to apiKey.
+             secret/generic-secret-assignment · INFERRED · athena
+
+MEDIUM
+  review
+    MEDIUM   Environment file in the change  .env.production
+             Environment file included in the change.
+             review/env-file · DETECTED · athena
+
+LOW
+  review
+    LOW      Debug statement added  src/old.ts:40  [baselined]
+             review/leftovers · DETECTED · athena
+
+INFO
+  review
+    INFO     Authentication code changed  src/auth/session.ts  [triaged (accepted-risk)]
+             review/auth · DETECTED · athena
+
+Gate: FAILED
+  - 1 open critical finding (fail on: high)
+  - Coverage incomplete: pip-audit failed
+
+Ratings
+  secret      E  1 open critical secret
+  dependency  D  1 open high advisory
+
+Coverage
+  athena-secrets  secret      ok           120 files scanned · skipped 2 too large, 1 binary
+  npm-audit       dependency  ok           package-lock.json · used network
+  pip-audit       dependency  failed       requirements.txt · used network · pip-audit exited with …
+  semgrep         sast        unavailable  semgrep is not installed
+  athena-review   review      ok           8 files scanned
+  2 engines did not run cleanly; the results above are incomplete.
+  Not covered by any engine: sast, iac, license, quality, memory
