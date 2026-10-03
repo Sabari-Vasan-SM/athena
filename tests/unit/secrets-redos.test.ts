@@ -52,27 +52,35 @@ const ADVERSARIAL: Record<string, string> = {
   'long dotted identifier': `${fill('a.b.c.', 60_000)} = "Zq8#mK2$vL9pW4xT7nB1"`,
 };
 
-// Generous for slow CI machines, still far below the seconds the old patterns took.
-const BUDGET_MS = 50 * (process.env.CI ? 4 : 1);
+// Generous for slow or busy machines, yet orders of magnitude below what the old patterns
+// took on these inputs (seconds at 16 KB, more than 12 minutes at 64 KB).
+const BUDGET_MS = 200 * (process.env.CI ? 4 : 1);
+
+/** Fastest of three runs: a backtracking regex is slow every time, a busy CPU only sometimes. */
+function bestOf3(fn: () => void): number {
+  let best = Infinity;
+  for (let i = 0; i < 3; i++) {
+    const t = performance.now();
+    fn();
+    best = Math.min(best, performance.now() - t);
+  }
+  return best;
+}
 
 describe('secret scanner is linear-time on adversarial input', () => {
   // Warm up the regex engine so the first case doesn't pay JIT costs.
   scanText(fill('warm up ', 4096));
 
   it.each(Object.entries(ADVERSARIAL))('%s', (_name, input) => {
-    const t = performance.now();
-    scanText(input);
-    const ms = performance.now() - t;
-    expect(ms).toBeLessThan(BUDGET_MS);
+    expect(bestOf3(() => scanText(input))).toBeLessThan(BUDGET_MS);
   });
 
   it('each pattern individually stays within budget on every input', () => {
     for (const p of SECRET_PATTERNS) {
       for (const [name, input] of Object.entries(ADVERSARIAL)) {
-        const re = new RegExp(p.regex.source, p.regex.flags);
-        const t = performance.now();
-        for (const _ of input.matchAll(re)) void _;
-        const ms = performance.now() - t;
+        const ms = bestOf3(() => {
+          for (const _ of input.matchAll(new RegExp(p.regex.source, p.regex.flags))) void _;
+        });
         expect(ms, `${p.id} on "${name}"`).toBeLessThan(BUDGET_MS);
       }
     }

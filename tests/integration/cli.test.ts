@@ -6,8 +6,6 @@ import { CLI, cleanupProjects, FAKE, gitInit, makeProject, REPO_ROOT, runCli } f
 import { KNOWLEDGE_DOCS } from '../../src/core/knowledge/documents.js';
 
 beforeAll(async () => {
-  // CLI tests exercise the built artifact.
-  await new Promise<void>((resolve, reject) => execFile('npx', ['tsup'], { cwd: REPO_ROOT, shell: process.platform === 'win32' }, (err) => (err ? reject(err) : resolve())));
   await fs.access(CLI);
 }, 120_000);
 afterAll(cleanupProjects);

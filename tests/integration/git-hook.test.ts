@@ -10,7 +10,6 @@ let shimDir = '';
 let shim = '';
 
 beforeAll(async () => {
-  await new Promise<void>((resolve, reject) => execFile('npx', ['tsup'], { cwd: REPO_ROOT, shell: isWin }, (err) => (err ? reject(err) : resolve())));
   await fs.access(CLI);
   // An `athena` on PATH that runs the freshly built CLI, as a global install would.
   shimDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'athena-shim-')));

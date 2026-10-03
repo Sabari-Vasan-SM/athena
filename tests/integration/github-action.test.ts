@@ -8,7 +8,6 @@ import { CLI, cleanupProjects, FAKE, gitInit, makeProject, REPO_ROOT, runCli, ty
 const REPORT = path.join(REPO_ROOT, 'action', 'report.mjs');
 
 beforeAll(async () => {
-  await new Promise<void>((resolve, reject) => execFile('npx', ['tsup'], { cwd: REPO_ROOT, shell: process.platform === 'win32' }, (err) => (err ? reject(err) : resolve())));
   await fs.access(CLI);
 }, 120_000);
 afterAll(cleanupProjects);

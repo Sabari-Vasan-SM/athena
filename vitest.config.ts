@@ -6,5 +6,7 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     testTimeout: 30_000,
+    // Builds dist/ once; tests must not rebuild it (see tests/global-setup.ts).
+    globalSetup: ['tests/global-setup.ts'],
   },
 });
