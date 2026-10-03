@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Unified findings: secrets, dependencies and review checks
+
+- New `.athena/findings.json` (gitignored): every security check now reports into one findings model with stable, value-free fingerprints, severity (`critical`…`info`, plus `unrated`), confidence, a FACT/DETECTED/INFERRED label, CWE, location or package, the engine that reported it, and a coverage record per engine (files scanned and skipped, tools unavailable/failed/timed out/skipped offline).
+- Secrets: one `secret/<pattern>` finding per match with file, line and column. Private keys and AWS/GCP/Azure credentials are `critical`, other known token formats `high`, keyword heuristics `medium` and marked *potential* (low confidence). Fingerprints hash the line with the matched value masked, so they survive rotating the value and reveal nothing about it; no secret value is ever written.
+- Dependency audits: one `dependency/vulnerable-package` finding per package and advisory (FACT, attributed to `npm-audit`, `pnpm-audit`, `pip-audit`, `govulncheck`, `cargo-audit` or `composer-audit`), with version, lockfile/target, advisory ids, vulnerable range, fixed version and CWE where the tool reports them. `moderate` is now `medium`; a missing severity stays `unrated`. npm packages that are only vulnerable through another reported package are not counted twice.
+- `athena review --json` gains a `scan` object (`scan.findings`, `scan.coverage`) with the checks as `review/<check>` findings (blocker → high, warning → medium, info → info) and added secrets as `secret/*` findings at the exact line. The existing `findings` list, human output and exit codes are unchanged.
+- `athena security` runs on the new scanners and writes both `.athena/findings.json` and the legacy `.athena/security-scan.json` (still used by the web UI and `security.md`). Flags, output, `--fail-on` and `--unrated` behave as before; `--json` keeps the v1 shape — the unified shape will be `athena scan --format json`.
+- A project that only has a `security-scan.json` from an older version is read as findings (its secret count becomes a coverage note, since v1 recorded no lines).
+
 ## 0.4.0 — 2026-10-03
 
 Agent memory: coding agents can now record what they learn — decisions and why, gotchas, bug root causes, conventions — and later sessions recall it. Memory lives in `.athena/memory/` as plain Markdown you commit and review like code. Anything an agent writes is `unreviewed` (INFERRED) until you confirm it (`athena memory review`, or the Memory page in `athena open`); entries turn `stale` when the files they describe change. Secrets are refused, and text that looks like it is trying to instruct the agent is flagged and kept out of recall.
