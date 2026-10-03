@@ -90,6 +90,7 @@ describe('athena CLI', () => {
     await fs.appendFile(path.join(dir, 'src/server.ts'), "app.post('/refunds', h);\n");
 
     const r2 = await runCli(['analyze', '--json'], dir);
+    expect(r2.code, r2.stderr).toBe(0);
     const out2 = JSON.parse(r2.stdout);
     expect(out2.documents.find((d: { file: string }) => d.file === 'api.md').preservedModified).toEqual(['endpoints']);
     const api2 = await read(dir, '.athena/api.md');
@@ -261,16 +262,16 @@ describe('agent presence detection', () => {
 });
 
 describe('build output', () => {
-  it('rebuilding the CLI does not delete the web UI build', async () => {
-    const marker = path.join(REPO_ROOT, 'dist/web/keep-test.html');
-    await fs.mkdir(path.dirname(marker), { recursive: true });
-    await fs.writeFile(marker, 'x');
-    try {
-      await new Promise<void>((resolve, reject) => execFile('npx', ['tsup'], { cwd: REPO_ROOT, shell: process.platform === 'win32' }, (err) => (err ? reject(err) : resolve())));
-      await expect(fs.access(marker)).resolves.toBeUndefined();
-    } finally {
-      await fs.rm(marker, { force: true });
-    }
+  it('rebuilding the CLI does not delete the web UI build, but does remove stale chunks', async () => {
+    // Build into a scratch directory: rebuilding the real dist/ mid-suite would delete
+    // chunks that CLI processes spawned by other tests are loading at that moment.
+    const out = await makeProject({ 'web/keep-test.html': 'x', 'stale-chunk-OLD.js': '// left over from an earlier build' });
+    await new Promise<void>((resolve, reject) =>
+      execFile('npx', ['tsup', '--out-dir', out], { cwd: REPO_ROOT, shell: process.platform === 'win32' }, (err) => (err ? reject(err) : resolve())),
+    );
+    await expect(fs.access(path.join(out, 'web/keep-test.html'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(out, 'cli.js'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(out, 'stale-chunk-OLD.js'))).rejects.toThrow();
   }, 120_000);
 });
 

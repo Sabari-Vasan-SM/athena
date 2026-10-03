@@ -46,7 +46,9 @@ export async function backdateTree(dir: string): Promise<void> {
 }
 
 export async function cleanupProjects(): Promise<void> {
-  await Promise.all(created.splice(0).map((d) => fs.rm(d, { recursive: true, force: true })));
+  // Windows refuses to delete a directory while a watcher or child process still holds a
+  // handle (EBUSY/EPERM); fs.rm's retries cover the moment it takes to be released.
+  await Promise.all(created.splice(0).map((d) => fs.rm(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })));
 }
 
 export interface CliResult {
@@ -58,8 +60,11 @@ export interface CliResult {
 export function runCli(args: string[], cwd: string, env: Record<string, string> = {}): Promise<CliResult> {
   return new Promise((resolve) => {
     execFile(process.execPath, [CLI, ...args], { cwd, env: { ...process.env, NO_COLOR: '1', CI: '1', ...env }, timeout: 60_000 }, (err, stdout, stderr) => {
-      const code = err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as { code: number }).code : 1) : 0;
-      resolve({ code, stdout, stderr });
+      const e = err as (Error & { code?: unknown; signal?: string | null; killed?: boolean }) | null;
+      const code = e ? (typeof e.code === 'number' ? e.code : 1) : 0;
+      // Make a killed or crashed process visible instead of a bare exit code 1.
+      const note = e && typeof e.code !== 'number' ? `\n[runCli] ${e.killed ? 'killed (timeout)' : 'failed'}: signal=${e.signal ?? 'none'} ${e.message}` : '';
+      resolve({ code, stdout, stderr: stderr + note });
     });
   });
 }

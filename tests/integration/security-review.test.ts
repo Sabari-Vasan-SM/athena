@@ -193,7 +193,7 @@ describe('CLI', () => {
   it('athena security reports and honors --fail-on', async () => {
     const dir = await project({ 'src/keys.ts': `export const k = "${FAKE.stripe}";\n` });
     const run = await runCli(['security', '--no-audit', '--json'], dir);
-    expect(run.code).toBe(0);
+    expect(run.code, run.stderr).toBe(0);
     const scan = JSON.parse(run.stdout) as SecurityScan;
     expect(scan.secrets.count).toBe(1);
     expect(run.stdout).not.toContain(FAKE.stripe);

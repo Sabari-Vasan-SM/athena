@@ -1,0 +1,1 @@
+{"9bc7585a3832ef242783548574c4b0843f9b254c49308683410e46f7c5504a82":{"env-code-refs0":[],"db-mongoose-models":[],"routes-js":[["GET","/products","Express",6],["GET","/products/:id","Express",11]],"auth-role-defs":[],"secrets:68b6e2f9e471":[]}}

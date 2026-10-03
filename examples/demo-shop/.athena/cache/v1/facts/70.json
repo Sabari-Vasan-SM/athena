@@ -1,0 +1,1 @@
+{"70e2cf61a30aee9517e3a435ab8fe56b38bcbb9df1021877aa9d3241abc17574":{"dockerfile":{"baseImages":["node:22-alpine"],"exposedPorts":["3000"]},"secrets:68b6e2f9e471":[]},"70e0b0662daa67a4f58304d752b2c45ba4888b560d0d78047ea23bac6a16b13a":{"env-code-refs0":["API_TOKEN"],"db-mongoose-models":[],"routes-js":[],"auth-role-defs":[],"secrets:68b6e2f9e471":[]}}

@@ -32,7 +32,7 @@ function counter() {
   return { reads, readFile: async (abs: string) => (reads.push(abs), fs.readFile(abs)) };
 }
 
-const rel = (dir: string, abs: string[]) => abs.map((a) => path.relative(dir, a)).sort();
+const rel = (dir: string, abs: string[]) => abs.map((a) => path.relative(dir, a).split(path.sep).join('/')).sort();
 const modelOf = async (dir: string) => JSON.stringify((await analyzeProject(dir)).model);
 
 async function initialized(files = sample()): Promise<string> {
