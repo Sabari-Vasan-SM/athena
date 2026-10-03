@@ -66,7 +66,7 @@ Generated content sits between `athena:generated` markers. Anything outside the 
 | `athena git-hook` | `install` (`--review`), `uninstall`, `status` — a Git pre-commit hook that blocks commits when knowledge is out of date |
 | `athena context <task>` | Show which knowledge an agent should read for a task (`--full`, `--json`) |
 | `athena graph` | Inspect the project graph (`--build`, `--search`, `--node`, `--kind`) |
-| `athena mcp` | Serve project intelligence to agents over MCP (stdio; `--allow-write`) |
+| `athena mcp` | Serve project intelligence to agents over MCP (stdio; `--allow-write`, `--no-memory-write`) |
 | `athena ai` | `status`, `enrich` — optional AI suggestions (`--consent`, `--dry-run`) |
 | `athena open` | Start (or reuse) the local web UI on `127.0.0.1`, watch for changes, and open it (`--port`, `--no-open`, `--no-watch`) |
 | `athena clean` | Remove `.athena/` and Athena integration blocks |
@@ -249,11 +249,19 @@ Documents to read
 
 - **Deterministic.** The same task and project state always produce the same selection, with a stated reason for each document. No AI is involved.
 - **Sections, not whole files.** Only the relevant sections are returned, under a character budget, with your rules always included.
+- **Project memory.** Up to five recalled memories from `.athena/memory/` (confirmed ones first, possible prompt injections excluded) are included with their label (`FACT` once a developer confirmed them, `INFERRED` while unreviewed), whether they are stale, and why they matched. They share the character budget (at most 30% of it) and appear in `--full` output and as `memories` in `--json`.
 - **Project graph.** `athena graph --build` writes `.athena/graph.json`: packages, files, routes, entities, frameworks and commands, connected by `contains`, `imports`, `handles`, `defines` and `depends_on`. It comes from the analysis, so it never asserts more than DETECTED evidence.
 
-**MCP.** `athena mcp` serves this to any MCP-capable agent over stdio, and `athena agents add` registers it (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor, `[mcp_servers.athena]` in `.codex/config.toml` for Codex, `servers.athena` in `.vscode/mcp.json` for GitHub Copilot in VS Code, `mcpServers.athena` in `.gemini/settings.json` for Gemini CLI). Tools: `get_relevant_context`, `get_project_context`, `get_architecture`, `get_database_schema`, `get_api_context`, `get_security_context`, `get_project_rules`, `get_knowledge_document`, `get_project_changes`, `get_project_graph`, `get_athena_status`, `update_knowledge`.
+**MCP.** `athena mcp` serves this to any MCP-capable agent over stdio, and `athena agents add` registers it (`.mcp.json` for Claude Code, `.cursor/mcp.json` for Cursor, `[mcp_servers.athena]` in `.codex/config.toml` for Codex, `servers.athena` in `.vscode/mcp.json` for GitHub Copilot in VS Code, `mcpServers.athena` in `.gemini/settings.json` for Gemini CLI). Tools: `get_relevant_context`, `get_project_context`, `get_architecture`, `get_database_schema`, `get_api_context`, `get_security_context`, `get_project_rules`, `get_knowledge_document`, `get_project_changes`, `get_project_graph`, `get_athena_status`, `update_knowledge`, and the memory tools `recall`, `list_memory` and `remember`.
 
-The server is **read-only by default**: `update_knowledge` reports what would change and refuses to write unless you start it with `--allow-write`. Repository content it returns is passed through the secret redactor and wrapped in `<athena-document … trust="untrusted-data">` delimiters, so agents can tell project data from instructions.
+The server is **read-only by default**: `update_knowledge` reports what would change and refuses to write unless you start it with `--allow-write`. The one exception is `remember`: an agent may append a memory to `.athena/memory/`, but it is always stored **unreviewed** (`INFERRED`, attributed to the agent, e.g. `agent:claude-code`, or `agent:mcp` when the client is not recognized) and counts as a `FACT` only after a developer confirms it. It never touches knowledge documents and refuses anything that looks like a secret. Start the server with `--no-memory-write` to turn it off.
+
+| Memory tool | Input | Returns |
+| --- | --- | --- |
+| `recall` | `task?`, `files?`, `tags?`, `limit?` | Ranked memories with why each matched, label, status and staleness, each in `<athena-memory … trust="untrusted-data">` delimiters. Entries that look like instructions to an agent are excluded (the reply says how many). |
+| `list_memory` | `kind?`, `status?`, `stale?` | One-line summaries: id, kind, status, label, stale, title |
+| `remember` | `kind`, `title`, `details?`, `files?`, `tags?`, `evidence?`, `supersedes?` | The new id and label (`INFERRED`); a developer must confirm it |
+ Repository content it returns is passed through the secret redactor and wrapped in `<athena-document … trust="untrusted-data">` (or `<athena-memory …>`) delimiters, so agents can tell project data from instructions. The generated agent instructions tell agents to `recall` at the start of a task, `remember` durable learnings at the end, and treat unreviewed memories as hints to verify — `rules.md` and the developer always win.
 
 ## Optional AI
 

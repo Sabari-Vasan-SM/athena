@@ -2,14 +2,16 @@ import path from 'node:path';
 import { analyzeProject } from '../core/analyzer/analyze.js';
 import { buildGraph, GRAPH_FILE, saveGraph, type ProjectGraph } from '../core/graph/graph.js';
 import { KNOWLEDGE_DOCS, type DocId } from '../core/knowledge/documents.js';
-import { documentSections, formatContext, selectContext, type RelevantContext } from '../core/context/context-engine.js';
+import { CONTEXT_MEMORY_LIMIT, documentSections, formatContext, selectContext, type ContextMemory, type RelevantContext } from '../core/context/context-engine.js';
+import { recall } from '../core/memory/memory.js';
 import { athenaDir } from '../core/state/state.js';
 import { readTextIfExists } from '../core/util/fs.js';
 import { AthenaError } from './errors.js';
+import { listMemory } from './memory.js';
 import { projectSession } from './project-session.js';
 
 export { formatContext } from '../core/context/context-engine.js';
-export type { RelevantContext } from '../core/context/context-engine.js';
+export type { ContextMemory, RelevantContext } from '../core/context/context-engine.js';
 
 /** Build (or rebuild) the project graph from the current analysis. */
 export async function refreshGraph(root: string, opts: { signal?: AbortSignal } = {}): Promise<ProjectGraph> {
@@ -61,7 +63,41 @@ export async function getRelevantContext(root: string, task: string, opts: Conte
     rulesMarkdown: await readTextIfExists(path.join(dir, 'rules.md')),
     graph: await getGraph(root, { build: opts.buildGraph, signal: opts.signal }),
     maxChars: opts.maxChars,
+    memories: await memoriesFor(root, task),
   });
+}
+
+/**
+ * Recall project memories for a task: flagged (possible prompt-injection) entries are
+ * excluded, confirmed ones come first. Memory is optional — a broken or missing store
+ * never fails context selection.
+ */
+export async function memoriesFor(root: string, task: string, files: string[] = []): Promise<ContextMemory[]> {
+  let hits;
+  try {
+    hits = recall(await listMemory(root), { task, files, limit: CONTEXT_MEMORY_LIMIT * 2 });
+  } catch {
+    return [];
+  }
+  const rank = (s: string) => (s === 'confirmed' ? 0 : 1);
+  return hits
+    .map((h, i) => ({ h, i }))
+    .sort((a, b) => rank(a.h.entry.status) - rank(b.h.entry.status) || a.i - b.i)
+    .slice(0, CONTEXT_MEMORY_LIMIT)
+    .map(({ h: { entry: e, why } }) => ({
+      id: e.id,
+      kind: e.kind,
+      status: e.status === 'confirmed' ? 'confirmed' : 'unreviewed',
+      label: e.label,
+      stale: e.stale,
+      changedFiles: e.changedFiles,
+      source: e.source,
+      title: e.title,
+      details: e.details,
+      files: e.files,
+      evidence: e.evidence,
+      why,
+    }));
 }
 
 /** Summary of the project graph for the UI/CLI. */

@@ -39,11 +39,21 @@ export async function contextCommand(task: string, opts: ContextCommandOptions):
     for (const n of ctx.graphNodes.slice(0, 12)) ui.line(`  ${ui.dim(`${n.kind}:`)} ${n.name}${n.path ? ui.dim(` (${n.path})`) : ''}`);
     if (ctx.graphNodes.length > 12) ui.line(ui.dim(`  +${ctx.graphNodes.length - 12} more`));
   }
+  if (ctx.memories.length) {
+    ui.line();
+    ui.heading('Project memory');
+    for (const m of ctx.memories) {
+      const label = m.label === 'FACT' ? ui.c.green(m.label) : ui.c.yellow(m.label);
+      ui.line(`  ${label} ${m.title} ${ui.dim(`(${m.id}, ${m.kind}${m.status === 'unreviewed' ? ', unreviewed' : ''}${m.stale ? ', stale' : ''})`)}`);
+      ui.line(ui.dim(`    ${m.why.join('; ')}`));
+    }
+    if (ctx.memories.some((m) => m.status === 'unreviewed')) ui.line(ui.dim('  Unreviewed memories were written by an agent; confirm or forget them with `athena memory`.'));
+  }
   ui.line();
   ui.heading('Sections selected');
   for (const s of ctx.sections) ui.line(`  ${ui.dim(`${s.file} →`)} ${s.section}`);
   ui.line();
-  ui.line(ui.dim(`${ctx.sections.length} sections · ~${ctx.approxChars} characters · ${ctx.rules.length} rules${ctx.truncated ? ' · some sections omitted for budget' : ''}`));
+  ui.line(ui.dim(`${ctx.sections.length} sections · ${ctx.memories.length} memories · ~${ctx.approxChars} characters · ${ctx.rules.length} rules${ctx.truncated ? ' · some content omitted for budget' : ''}`));
   ui.line(ui.dim('Use --full to print the context an agent would read, or --json for tooling.'));
 }
 

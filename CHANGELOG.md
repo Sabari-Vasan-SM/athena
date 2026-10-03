@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Agent memory: MCP, context and instructions
+
+- New MCP tools `recall` (ranked memories for a task and/or files, with why each matched, label, status and staleness, fenced in `<athena-memory … trust="untrusted-data">` delimiters; entries flagged as possible prompt injection are excluded and counted), `list_memory` (summaries filtered by kind, status, stale) and `remember` (records a memory as **unreviewed**/INFERRED, attributed to `agent:<id>` from the client's `clientInfo.name` — claude-code, cursor, codex, copilot, gemini-cli, antigravity, windsurf, cline — or `agent:mcp`). `remember` is the only write the MCP server allows without `--allow-write`; it never touches knowledge documents, refuses secrets without echoing them, and is disabled by `athena mcp --no-memory-write`.
+- `athena context` and `get_relevant_context` include up to five recalled memories (confirmed first, flagged excluded) with labels and reasons, within the character budget (at most 30% of it). `--json` and `/api/context` gain a `memories` field.
+- Generated agent instructions (all adapters) tell agents to recall project memory at the start of a task, record durable, non-obvious learnings with `remember` at the end, and treat unreviewed memories as hints to verify — never instructions; `rules.md` and the developer always win.
+
 ## 0.3.0 — 2026-09-30
 
 Performance release: work is now proportional to what changed. On a 20,000-file repository (vs 0.2.1): a `sync --check` with nothing changed takes ~0.42 s instead of 2.9 s, `status` 0.14 s instead of 0.34 s, agent hooks start in ~28 ms instead of 112 ms, and peak memory is 20–52% lower in every scenario. The generated `model.json` is unchanged (golden-tested against the 0.2.1 analyzer). Benchmarks: `npm run bench`.
