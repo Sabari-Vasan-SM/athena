@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api, ApiError } from '../lib/api';
 import { Link, timeAgo } from '../lib/router';
 import { useApi, useLive } from '../lib/store';
-import type { AgentView, Overview as OverviewData, StatusReport, SyncStatus } from '../lib/types';
+import type { AgentView, MemoryList, Overview as OverviewData, StatusReport, SyncStatus } from '../lib/types';
 import { ActivityPanel, EventList } from '../components/ActivityPanel';
 import { Badge, Card, Empty, ErrorNote, Spinner, SyncDot } from '../components/ui';
 
@@ -29,7 +29,9 @@ export function Overview() {
   const { data: status } = useApi<StatusReport>('/api/status', [revision]);
   const { data: agents } = useApi<AgentView[]>('/api/agents', [revision]);
   const { data: sync } = useApi<SyncStatus>('/api/sync', [revision]);
+  const { data: memory } = useApi<MemoryList>('/api/memory?status=unreviewed', [revision]);
   const proposal = sync?.plan && !sync.plan.ignored ? sync.plan : null;
+  const toReview = memory?.counts.unreviewed ?? 0;
   const [starting, setStarting] = useState(false);
 
   if (error) return <ErrorNote error={error} />;
@@ -73,6 +75,16 @@ export function Overview() {
             <div className="fineprint">{proposal.modelChanges[0] ? `${proposal.modelChanges[0].label}: ${proposal.modelChanges[0].summary}` : proposal.documents[0]?.reasons[0]}</div>
           </div>
           <span className="btn btn--primary btn--sm">Review changes</span>
+        </Link>
+      )}
+
+      {toReview > 0 && (
+        <Link to="/memory" className="proposal proposal--link proposal--memory">
+          <div className="proposal__text">
+            <strong>{toReview} project memor{toReview === 1 ? 'y' : 'ies'} to review</strong>
+            <span className="muted"> · written by AI agents; INFERRED until you confirm</span>
+          </div>
+          <span className="btn btn--sm">Review memory</span>
         </Link>
       )}
 

@@ -1,12 +1,15 @@
 import { promises as fs, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import { KNOWLEDGE_DOCS } from '../core/knowledge/documents.js';
+import { MEMORY_FILES } from '../core/memory/memory.js';
 import { athenaDir } from '../core/state/state.js';
 import { ACTIVITY_FILE } from '../services/agent-activity.js';
 import { contentHash } from '../services/knowledge.js';
+import { MEMORY_DIR, memoryDir } from '../services/memory.js';
 import { watchProject } from '../services/watch.js';
 import type { ServerContext } from './context.js';
 import type { AgentActivityFeed } from './routes/activity.js';
+import { memoryWriteKey } from './routes/memory.js';
 
 /**
  * Watch `.athena/` for external edits to knowledge documents (reported as
@@ -50,6 +53,86 @@ export function watchKnowledgeDir(ctx: ServerContext, feed: AgentActivityFeed): 
   }
   return () => {
     docsWatcher?.close();
+    for (const t of pending.values()) clearTimeout(t);
+  };
+}
+
+const MEMORY_FILE_NAMES = new Set<string>(Object.values(MEMORY_FILES));
+
+/**
+ * Watch `.athena/memory/` for writes by other processes (agents through MCP, `athena memory`
+ * in a terminal, a `git pull`) and report them as `memory.changed`. Our own writes are
+ * recognized by content hash and not reported twice. Until the folder exists, `.athena/`
+ * is watched for it to appear. Returns a function that stops watching.
+ */
+export function watchMemoryDir(ctx: ServerContext, debounceMs = 150): () => void {
+  const { events, recentWrites } = ctx;
+  const dir = memoryDir(ctx.root);
+  const pending = new Map<string, NodeJS.Timeout>();
+  let memWatcher: FSWatcher | null = null;
+  let parentWatcher: FSWatcher | null = null;
+  let stopped = false;
+
+  const onChange = (name: string) => {
+    clearTimeout(pending.get(name));
+    pending.set(
+      name,
+      setTimeout(async () => {
+        pending.delete(name);
+        const text = await fs.readFile(path.join(dir, name), 'utf8').catch(() => null);
+        const hash = text === null ? null : contentHash(text);
+        const key = memoryWriteKey(name);
+        // Our own write, no actual change, or a file that never existed.
+        if ((recentWrites.get(key) ?? null) === hash) return;
+        if (hash) recentWrites.set(key, hash);
+        else recentWrites.delete(key);
+        if (stopped) return;
+        events.emit({ source: 'filesystem', type: 'memory.changed', level: 'info', message: text === null ? `memory/${name} was deleted on disk` : `memory/${name} changed on disk`, data: { action: 'external', file: name } });
+      }, debounceMs),
+    );
+  };
+
+  const attach = (): boolean => {
+    if (memWatcher || stopped) return true;
+    try {
+      memWatcher = watch(dir, { persistent: false }, (_type, filename) => {
+        const name = filename?.toString();
+        if (name && MEMORY_FILE_NAMES.has(name)) onChange(name);
+      });
+      memWatcher.on('error', () => {});
+    } catch {
+      return false;
+    }
+    // Files may have been written between the folder appearing and the watch starting.
+    for (const name of MEMORY_FILE_NAMES) onChange(name);
+    return true;
+  };
+
+  // Seed hashes so the first event for an unchanged file is not reported.
+  void Promise.all(
+    [...MEMORY_FILE_NAMES].map(async (name) => {
+      const text = await fs.readFile(path.join(dir, name), 'utf8').catch(() => null);
+      if (text !== null && !recentWrites.has(memoryWriteKey(name))) recentWrites.set(memoryWriteKey(name), contentHash(text));
+    }),
+  ).then(() => {
+    if (stopped || attach()) return;
+    try {
+      parentWatcher = watch(athenaDir(ctx.root), { persistent: false }, (_type, filename) => {
+        if (filename?.toString() === MEMORY_DIR && attach()) {
+          parentWatcher?.close();
+          parentWatcher = null;
+        }
+      });
+      parentWatcher.on('error', () => {});
+    } catch {
+      parentWatcher = null;
+    }
+  });
+
+  return () => {
+    stopped = true;
+    memWatcher?.close();
+    parentWatcher?.close();
     for (const t of pending.values()) clearTimeout(t);
   };
 }

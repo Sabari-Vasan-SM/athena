@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Memory page (`athena open`)
+
+- New **Memory** page (`/memory`, in the sidebar with a badge for entries awaiting review) to review project memory in `.athena/memory/*.md`. The review queue (agent-written, INFERRED entries) comes first with Confirm / Edit / Forget; confirmed entries (FACT) follow and superseded ones are collapsed. Cards show kind, FACT/INFERRED label, who recorded it and when, linked files, tags and evidence; details are shown as plain text, never rendered as Markdown or HTML. Stale entries (a linked file changed since) show the changed files and a Re-confirm action; entries that look like prompt injection carry a red warning. Filter chips (kind, status, stale, flagged), a text filter, and an Add memory form (developer entries are FACT immediately). The Overview links to the queue when entries await review.
+- API: `GET /api/memory` (`kind`, `status`, `stale` filters; returns entries and counts), `GET /api/memory/:id`, `POST /api/memory`, `POST /api/memory/:id/confirm`, `POST /api/memory/:id/supersede`, `PATCH /api/memory/:id`, `DELETE /api/memory/:id` — all behind the existing token, Host/Origin and JSON-only checks, with strict schemas. Unknown ids are 404, superseded/busy/full conflicts 409, invalid input and refused secrets 400 (the secret value is never echoed).
+- A `memory.changed` event is emitted after every write from the UI and when memory files change on disk (an agent writing through MCP, `athena memory` in a terminal, a `git pull`), so open pages refresh live.
+
 ## 0.3.0 — 2026-09-30
 
 Performance release: work is now proportional to what changed. On a 20,000-file repository (vs 0.2.1): a `sync --check` with nothing changed takes ~0.42 s instead of 2.9 s, `status` 0.14 s instead of 0.34 s, agent hooks start in ~28 ms instead of 112 ms, and peak memory is 20–52% lower in every scenario. The generated `model.json` is unchanged (golden-tested against the 0.2.1 analyzer). Benchmarks: `npm run bench`.
