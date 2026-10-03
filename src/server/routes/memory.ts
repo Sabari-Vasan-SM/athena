@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { MEMORY_FILES, MEMORY_KINDS, MEMORY_STATUSES } from '../../core/memory/memory.js';
-import { AthenaError, conflict, notFound } from '../../services/errors.js';
+import { AthenaError } from '../../services/errors.js';
 import { contentHash } from '../../services/knowledge.js';
 import {
   addMemory,
@@ -54,18 +54,6 @@ export function memoryCounts(entries: MemoryView[]): MemoryCounts {
   };
 }
 
-/**
- * The memory service reports every failure as a plain (400) AthenaError; give the
- * ones the UI needs to tell apart their proper status.
- */
-function classify(err: unknown): never {
-  if (err instanceof AthenaError && err.kind === 'invalid') {
-    if (/^No memory with id /.test(err.message)) throw notFound(err.message);
-    if (/ was superseded by |is busy|is full|over its size limit/.test(err.message)) throw conflict(err.message, err.hint);
-  }
-  throw err;
-}
-
 /** Project memory (`.athena/memory/*.md`): list, review (confirm/supersede/edit/forget) and developer add. */
 export function registerMemoryRoutes({ app, root, events, recentWrites }: ServerContext): void {
   /** Remember what we wrote so the watcher doesn't report our own writes as external. */
@@ -99,7 +87,7 @@ export function registerMemoryRoutes({ app, root, events, recentWrites }: Server
     },
   );
 
-  app.get<{ Params: { id: string } }>('/api/memory/:id', { schema: { params: idParams } }, async (req) => getMemory(root, req.params.id).catch(classify));
+  app.get<{ Params: { id: string } }>('/api/memory/:id', { schema: { params: idParams } }, async (req) => getMemory(root, req.params.id));
 
   app.post<{ Body: MemoryInput }>(
     '/api/memory',
@@ -114,14 +102,14 @@ export function registerMemoryRoutes({ app, root, events, recentWrites }: Server
       },
     },
     async (req, reply) => {
-      const entry = await addMemory(root, req.body, 'developer').catch(classify);
+      const entry = await addMemory(root, req.body, 'developer');
       await changed('add', entry.id, `Added memory: ${entry.title}`);
       return reply.code(201).send(entry);
     },
   );
 
   app.post<{ Params: { id: string } }>('/api/memory/:id/confirm', { schema: { params: idParams } }, async (req) => {
-    const entry = await confirmMemory(root, req.params.id).catch(classify);
+    const entry = await confirmMemory(root, req.params.id);
     await changed('confirm', entry.id, `Confirmed memory: ${entry.title}`);
     return entry;
   });
@@ -132,10 +120,10 @@ export function registerMemoryRoutes({ app, root, events, recentWrites }: Server
     async (req) => {
       const { id } = req.params;
       const { by } = req.body;
-      await getMemory(root, id).catch(classify);
+      await getMemory(root, id);
       // An unknown replacement is a bad request, not a missing resource.
       if (id !== by && !(await listMemory(root)).some((e) => e.id === by)) throw new AthenaError(`Cannot supersede ${id}: no memory with id ${by}.`);
-      const entry = await supersedeMemory(root, id, by).catch(classify);
+      const entry = await supersedeMemory(root, id, by);
       await changed('supersede', entry.id, `Memory ${id} superseded by ${by}`);
       return entry;
     },
@@ -145,14 +133,14 @@ export function registerMemoryRoutes({ app, root, events, recentWrites }: Server
     '/api/memory/:id',
     { schema: { params: idParams, body: { type: 'object', minProperties: 1, additionalProperties: false, properties: fields } } },
     async (req) => {
-      const entry = await updateMemory(root, req.params.id, req.body).catch(classify);
+      const entry = await updateMemory(root, req.params.id, req.body);
       await changed('edit', entry.id, `Edited memory: ${entry.title}`);
       return entry;
     },
   );
 
   app.delete<{ Params: { id: string } }>('/api/memory/:id', { schema: { params: idParams } }, async (req) => {
-    await forgetMemory(root, req.params.id).catch(classify);
+    await forgetMemory(root, req.params.id);
     await changed('forget', req.params.id, `Forgot memory ${req.params.id}`);
     return { ok: true };
   });

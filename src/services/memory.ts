@@ -24,7 +24,7 @@ import {
   type RecallHit,
   type RecallQuery,
 } from '../core/memory/memory.js';
-import { AthenaError } from './errors.js';
+import { AthenaError, conflict, EXIT } from './errors.js';
 
 export { MemoryError, type MemoryView, type RecallHit, type RecallQuery, type MemoryInput, type MemoryKind, type MemoryStatus };
 
@@ -55,7 +55,7 @@ async function withLock<T>(root: string, fn: () => Promise<T>): Promise<T> {
         await fs.rm(lock, { force: true });
         continue;
       }
-      if (Date.now() > deadline) throw new AthenaError('Project memory is busy (another process is writing it).', 'Try again in a moment.');
+      if (Date.now() > deadline) throw new AthenaError('Project memory is busy (another process is writing it).', 'Try again in a moment.', EXIT.ERROR, 'busy');
       await new Promise((r) => setTimeout(r, 50));
     }
   }
@@ -134,7 +134,7 @@ export async function listMemory(root: string, opts: ListOptions = {}): Promise<
 
 export async function getMemory(root: string, id: string): Promise<MemoryView> {
   const hit = (await listMemory(root)).find((v) => v.id === id);
-  if (!hit) throw new AthenaError(`No memory with id ${id}.`, 'List them with `athena memory list`.');
+  if (!hit) throw new AthenaError(`No memory with id ${id}.`, 'List them with `athena memory list`.', EXIT.ERROR, 'not-found');
   return hit;
 }
 
@@ -169,9 +169,9 @@ export async function addMemory(root: string, input: MemoryInput, source: string
   return withLock(root, async () => {
     const all = await readAll(root);
     const entries = [...all.values()].flatMap(entriesOf);
-    if (entries.length >= LIMITS.entries) throw new AthenaError(`Project memory is full (${LIMITS.entries} entries).`, 'Forget or supersede old entries with `athena memory forget <id>`.');
+    if (entries.length >= LIMITS.entries) throw conflict(`Project memory is full (${LIMITS.entries} entries).`, 'Forget or supersede old entries with `athena memory forget <id>`.');
     const bytes = [...all.values()].reduce((n, f) => n + Buffer.byteLength(serializeMemoryFile(f)), 0);
-    if (bytes > LIMITS.totalBytes) throw new AthenaError('Project memory is over its size limit.', 'Forget or shorten old entries.');
+    if (bytes > LIMITS.totalBytes) throw conflict('Project memory is over its size limit.', 'Forget or shorten old entries.');
     if (clean.supersedes && !entries.some((e) => e.id === clean.supersedes)) throw new AthenaError(`Cannot supersede ${clean.supersedes}: no such memory.`);
 
     const now = new Date().toISOString();
@@ -228,14 +228,14 @@ async function mutate(root: string, id: string, fn: (e: MemoryEntry, file: Memor
       await writeKind(root, file);
       return;
     }
-    throw new AthenaError(`No memory with id ${id}.`, 'List them with `athena memory list`.');
+    throw new AthenaError(`No memory with id ${id}.`, 'List them with `athena memory list`.', EXIT.ERROR, 'not-found');
   });
 }
 
 /** Developer confirmation: the entry becomes FACT and is re-anchored to the current files. */
 export async function confirmMemory(root: string, id: string): Promise<MemoryView> {
   await mutate(root, id, async (e, _f, all) => {
-    if (e.status === 'superseded') throw new AthenaError(`${id} was superseded by ${e.supersededBy ?? 'a newer memory'}; confirm that one instead.`);
+    if (e.status === 'superseded') throw conflict(`${id} was superseded by ${e.supersededBy ?? 'a newer memory'}; confirm that one instead.`);
     e.status = 'confirmed';
     e.confirmedAt = new Date().toISOString();
     e.anchors = await anchorsFor(root, e.files);
@@ -248,7 +248,8 @@ export async function confirmMemory(root: string, id: string): Promise<MemoryVie
 /** Mark `id` as replaced by the newer memory `by`. */
 export async function supersedeMemory(root: string, id: string, by: string): Promise<MemoryView> {
   if (id === by) throw new AthenaError('A memory cannot supersede itself.');
-  await getMemory(root, by);
+  // An unknown replacement is bad input (400), not a missing target (404).
+  if (!(await listMemory(root)).some((m) => m.id === by)) throw new AthenaError(`Cannot supersede with ${by}: no such memory.`, 'Pass the id of the newer memory.');
   await mutate(root, id, async (e) => {
     e.status = 'superseded';
     e.supersededBy = by;
@@ -266,8 +267,8 @@ export async function updateMemory(root: string, id: string, patch: Partial<Omit
   await mutate(root, id, async (e) => {
     let clean;
     try {
-      // A field present in the patch replaces the old value; an empty string clears details/evidence.
-      const pick = <K extends keyof typeof patch>(k: K, cur: MemoryEntry[K & keyof MemoryEntry]) => (k in patch ? patch[k] : cur);
+      // undefined = unchanged; any other value replaces the old one (an empty string clears details/evidence).
+      const pick = <K extends keyof typeof patch>(k: K, cur: MemoryEntry[K & keyof MemoryEntry]) => (patch[k] !== undefined ? patch[k] : cur);
       clean = normalizeInput({ kind: e.kind, title: pick('title', e.title) as string, details: (pick('details', e.details) as string | undefined) ?? '', files: pick('files', e.files) as string[], tags: pick('tags', e.tags) as string[], evidence: (pick('evidence', e.evidence) as string | undefined) || undefined });
     } catch (err) {
       toAthenaError(err);

@@ -132,7 +132,7 @@ function parseEntry(kind: MemoryKind, meta: Record<string, string>, body: string
   if (!id || !/^m-[a-z0-9]{4,16}$/.test(id)) return null;
   const titleIdx = body.findIndex((l) => /^###\s+/.test(l));
   if (titleIdx < 0) return null;
-  const title = body[titleIdx]!.replace(/^###\s+/, '').trim();
+  const title = unescapeText(body[titleIdx]!.replace(/^###\s+/, '').trim());
   const rest = body.slice(titleIdx + 1);
   const isTrailer = (l: string) => /^-\s+(Files|Tags|Evidence):/i.test(l.trim());
   const firstTrailer = rest.findIndex(isTrailer);
@@ -150,10 +150,10 @@ function parseEntry(kind: MemoryKind, meta: Record<string, string>, body: string
     status,
     source: meta.source ?? 'unknown',
     title,
-    details: detailLines.join('\n').trim(),
+    details: unescapeBlock(detailLines.join('\n').trim()),
     files: splitList(trailer(trailerLines, 'Files'), /^`|`$/g),
     tags: splitList(trailer(trailerLines, 'Tags'), /^#/),
-    evidence: trailer(trailerLines, 'Evidence') || undefined,
+    evidence: unescapeText(trailer(trailerLines, 'Evidence') ?? '') || undefined,
     createdAt: meta.created ?? '',
     confirmedAt: meta.confirmed,
     supersedes: meta.supersedes,
@@ -203,12 +203,12 @@ function renderEntry(e: MemoryEntry): string {
   if (e.supersededBy) meta.push(`superseded-by=${e.supersededBy}`);
   const anchors = Object.entries(e.anchors).map(([f, h]) => `${f}@${h}`);
   if (anchors.length) meta.push(`anchors=${anchors.map(enc).join(',')}`);
-  const out = [`${START}${meta.join(' ')} -->`, `### ${e.title}`];
-  if (e.details) out.push('', e.details);
+  const out = [`${START}${meta.join(' ')} -->`, `### ${escapeText(e.title)}`];
+  if (e.details) out.push('', escapeBlock(e.details));
   const trailers: string[] = [];
   if (e.files.length) trailers.push(`- Files: ${e.files.map((f) => `\`${f}\``).join(', ')}`);
   if (e.tags.length) trailers.push(`- Tags: ${e.tags.join(', ')}`);
-  if (e.evidence) trailers.push(`- Evidence: ${e.evidence}`);
+  if (e.evidence) trailers.push(`- Evidence: ${escapeText(e.evidence)}`);
   if (trailers.length) out.push('', ...trailers);
   out.push(END);
   return out.join('\n');
@@ -261,18 +261,25 @@ function cleanPath(p: string): string {
   return s;
 }
 
-/** Keep stored text from breaking the file format. */
-const neutralize = (s: string) => s.replace(/<!--/g, '&lt;!--').replace(/-->/g, '--&gt;');
+/**
+ * Escaping only exists in the file: text is escaped when written so it can't open or
+ * close a comment marker or start a fake entry heading, and unescaped when read, so
+ * every consumer (CLI, MCP, API, UI) sees exactly what was recorded.
+ */
+const escapeText = (s: string) => s.replace(/<!--/g, '&lt;!--').replace(/-->/g, '--&gt;');
+const escapeBlock = (s: string) => escapeText(s).replace(/^###/gm, '\\###');
+const unescapeText = (s: string) => s.replace(/&lt;!--/g, '<!--').replace(/--&gt;/g, '-->');
+const unescapeBlock = (s: string) => unescapeText(s).replace(/^\\###/gm, '###');
 
 /** Validate and normalize input. Throws MemoryError; never stores a secret. */
 export function normalizeInput(input: MemoryInput): Required<Pick<MemoryInput, 'kind' | 'title' | 'details' | 'files' | 'tags'>> & Pick<MemoryInput, 'evidence' | 'supersedes'> {
   if (!(MEMORY_KINDS as readonly string[]).includes(input.kind)) throw new MemoryError(`Unknown memory kind: ${input.kind}`, `Use one of: ${MEMORY_KINDS.join(', ')}`);
-  const title = neutralize((input.title ?? '').replace(/\s+/g, ' ').trim());
+  const title = (input.title ?? '').replace(/\s+/g, ' ').trim();
   if (title.length < 3) throw new MemoryError('A memory needs a title (at least 3 characters).');
   if (title.length > LIMITS.title) throw new MemoryError(`Title is longer than ${LIMITS.title} characters.`, 'Put the detail in `details`.');
-  const details = neutralize((input.details ?? '').trim()).replace(/^###/gm, '\\###');
+  const details = (input.details ?? '').trim();
   if (details.length > LIMITS.details) throw new MemoryError(`Details are longer than ${LIMITS.details} characters.`, 'Keep memories short; link to files or docs for the rest.');
-  const evidence = input.evidence ? neutralize(input.evidence.replace(/\s+/g, ' ').trim()) : undefined;
+  const evidence = input.evidence ? input.evidence.replace(/\s+/g, ' ').trim() : undefined;
   if (evidence && evidence.length > LIMITS.evidence) throw new MemoryError(`Evidence is longer than ${LIMITS.evidence} characters.`);
   const files = [...new Set((input.files ?? []).map(cleanPath))];
   if (files.length > LIMITS.files) throw new MemoryError(`At most ${LIMITS.files} files per memory.`);

@@ -39,7 +39,6 @@ export function sourceLabel(source: string): string {
 }
 
 /** Undo the escaping the store applies to keep entries from breaking the file format (display only; still rendered as text). */
-export const displayText = (s: string) => s.replace(/&lt;!--/g, '<!--').replace(/--&gt;/g, '-->').replace(/^\\###/gm, '###');
 
 const splitList = (s: string) => s.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
 
@@ -63,11 +62,11 @@ export interface MemoryActions {
 function MemoryForm({ initial, replaceable, submitLabel, onSubmit, onCancel, busy }: { initial?: MemoryView; replaceable?: MemoryView[]; submitLabel: string; onSubmit: (d: MemoryDraft) => Promise<boolean>; onCancel: () => void; busy: boolean }) {
   const uid = useId();
   const [kind, setKind] = useState<MemoryKind>(initial?.kind ?? 'decision');
-  const [title, setTitle] = useState(initial ? displayText(initial.title) : '');
-  const [details, setDetails] = useState(initial ? displayText(initial.details) : '');
+  const [title, setTitle] = useState(initial ? initial.title : '');
+  const [details, setDetails] = useState(initial ? initial.details : '');
   const [files, setFiles] = useState(initial?.files.join(', ') ?? '');
   const [tags, setTags] = useState(initial?.tags.join(', ') ?? '');
-  const [evidence, setEvidence] = useState(initial?.evidence ? displayText(initial.evidence) : '');
+  const [evidence, setEvidence] = useState(initial?.evidence ? initial.evidence : '');
   const [supersedes, setSupersedes] = useState('');
 
   const submit = async (e: FormEvent) => {
@@ -118,7 +117,7 @@ function MemoryForm({ initial, replaceable, submitLabel, onSubmit, onCancel, bus
           <select id={`${uid}-supersedes`} className="select" value={supersedes} onChange={(e) => setSupersedes(e.target.value)}>
             <option value="">Nothing</option>
             {replaceable.map((m) => (
-              <option key={m.id} value={m.id}>{m.id} · {displayText(m.title).slice(0, 80)}</option>
+              <option key={m.id} value={m.id}>{m.id} · {m.title.slice(0, 80)}</option>
             ))}
           </select>
         </label>
@@ -132,7 +131,7 @@ function MemoryForm({ initial, replaceable, submitLabel, onSubmit, onCancel, bus
 }
 
 export function MemoryCard({ entry, busy, editing, onConfirm, onEdit, onCancelEdit, onSave, onForget }: { entry: MemoryView; busy: boolean; editing: boolean; onConfirm: () => void; onEdit: () => void; onCancelEdit: () => void; onSave: (d: MemoryDraft) => Promise<boolean>; onForget: () => void }) {
-  const title = displayText(entry.title);
+  const title = entry.title;
   const isAgent = entry.source.startsWith('agent:');
   return (
     <article className={`memory memory--${entry.status} ${entry.flags.length ? 'memory--flagged' : ''}`} aria-label={`${kindLabel(entry.kind)}: ${title}`} data-testid={`memory-${entry.id}`}>
@@ -163,7 +162,7 @@ export function MemoryCard({ entry, busy, editing, onConfirm, onEdit, onCancelEd
       ) : (
         <>
           <h3 className="memory__title">{title}</h3>
-          {entry.details && <p className="memory__details">{displayText(entry.details)}</p>}
+          {entry.details && <p className="memory__details">{entry.details}</p>}
           {(entry.files.length > 0 || entry.tags.length > 0 || entry.evidence) && (
             <dl className="memory__facts">
               {entry.files.length > 0 && (
@@ -181,7 +180,7 @@ export function MemoryCard({ entry, busy, editing, onConfirm, onEdit, onCancelEd
               {entry.evidence && (
                 <div>
                   <dt>Evidence</dt>
-                  <dd className="memory__evidence">{displayText(entry.evidence)}</dd>
+                  <dd className="memory__evidence">{entry.evidence}</dd>
                 </div>
               )}
             </dl>
@@ -373,7 +372,7 @@ export function MemoryBoard({ list, actions, busy = false }: { list: MemoryList;
         title="Forget this memory?"
         body={
           <>
-            <p className="dialog__quote">{forgetting ? displayText(forgetting.title) : ''}</p>
+            <p className="dialog__quote">{forgetting ? forgetting.title : ''}</p>
             <p className="muted">It is removed from <span className="mono">.athena/memory/</span>. Git history keeps the old version.</p>
           </>
         }
