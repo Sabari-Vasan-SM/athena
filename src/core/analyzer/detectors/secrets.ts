@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import type { Detector, FactDef, FactRuntime } from '../context.js';
 import type { FileEntry } from '../../fs/walker.js';
 import type { SecretFinding } from '../../model/project-model.js';
-import { ephemeralFingerprint, scanText, type ScanStats } from '../../security/secrets.js';
+import { ephemeralFingerprint, scanText, type ScanStats, type SecretMatch } from '../../security/secrets.js';
 import { getOrCreateSalt, keyedFingerprint, readLocalConfig } from '../../local-config.js';
 import { ATHENA_DIR } from '../../config.js';
 
@@ -50,19 +50,40 @@ export interface SecretScanResult {
   findings: SecretFinding[];
   truncated: boolean;
   skippedLongLines: number;
+  /** What the scan covered: files read, and files not read by reason. */
+  files: { scanned: number; binary: number; tooLarge: number; minified: number; excluded: number; unreadable: number };
 }
+
+const MINIFIED = /\.(min\.js|map)$/;
 
 /** Scan project files for likely credentials. Shared by the analyzer and `athena security`. */
 export async function scanFilesForSecrets(
   files: FileEntry[],
   read: (rel: string) => Promise<string | null>,
-  opts: { fingerprint: (value: string) => string; signal?: AbortSignal; max?: number; into?: SecretFinding[] },
+  opts: {
+    fingerprint: (value: string) => string;
+    signal?: AbortSignal;
+    max?: number;
+    into?: SecretFinding[];
+    /**
+     * Called for each file with matches, with the file's text and the match offsets, so
+     * a caller can locate and mask the matched span. Never store `text` or the values.
+     */
+    onFile?: (file: string, text: string, matches: SecretMatch[]) => void;
+  },
 ): Promise<SecretScanResult> {
   const findings = opts.into ?? [];
   const max = opts.max ?? MAX_SECRET_FINDINGS;
   const stats: ScanStats = { skippedLongLines: 0 };
+  const counts: SecretScanResult['files'] = { scanned: 0, binary: 0, tooLarge: 0, minified: 0, excluded: 0, unreadable: 0 };
   let truncated = false;
   for (const f of files) {
+    if (f.binary) counts.binary++;
+    else if (f.large) counts.tooLarge++;
+    else if (SKIP.test(f.path)) {
+      if (MINIFIED.test(f.path)) counts.minified++;
+      else counts.excluded++;
+    }
     if (f.binary || f.large || SKIP.test(f.path)) continue;
     if (findings.length >= max) {
       truncated = true;
@@ -70,10 +91,14 @@ export async function scanFilesForSecrets(
     }
     opts.signal?.throwIfAborted();
     const text = await read(f.path);
+    if (text === null) counts.unreadable++;
+    else counts.scanned++;
     if (!text) continue;
-    for (const m of scanText(text, { fingerprint: opts.fingerprint, stats })) findings.push({ type: m.type, file: f.path, line: m.line, fingerprint: m.fingerprint });
+    const matches = scanText(text, { fingerprint: opts.fingerprint, stats });
+    for (const m of matches) findings.push({ type: m.type, file: f.path, line: m.line, fingerprint: m.fingerprint });
+    if (matches.length) opts.onFile?.(f.path, text, matches);
   }
-  return { findings, truncated, skippedLongLines: stats.skippedLongLines };
+  return { findings, truncated, skippedLongLines: stats.skippedLongLines, files: counts };
 }
 
 /** Findings in one file: [type, line, keyed fingerprint]. Keyed by the fingerprint key. */
