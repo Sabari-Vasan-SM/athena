@@ -18,7 +18,7 @@ interface LiveState {
 const Ctx = createContext<LiveState | null>(null);
 
 /** Events after which data on disk may have changed, so pages should refetch. */
-const REFRESHING_EVENT = /^(knowledge|analysis\.completed|rules|agents|sync|git|security|graph)(\.|$)/;
+const REFRESHING_EVENT = /^(knowledge|analysis\.completed|rules|agents|sync|git|security|graph|memory)(\.|$)/;
 export function bumpsRevision(type: string): boolean {
   return REFRESHING_EVENT.test(type);
 }

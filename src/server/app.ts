@@ -12,6 +12,7 @@ import { registerContextRoutes } from './routes/context.js';
 import { registerDocsRoutes } from './routes/docs.js';
 import { registerEventRoutes } from './routes/events.js';
 import { registerGraphRoutes } from './routes/graph.js';
+import { registerMemoryRoutes } from './routes/memory.js';
 import { registerReviewRoutes } from './routes/review.js';
 import { registerRulesRoutes } from './routes/rules.js';
 import { registerSecurityRoutes } from './routes/security.js';
@@ -21,7 +22,7 @@ import { registerSyncRoutes } from './routes/sync.js';
 import { allowedHostsFor, allowedOriginsFor, DEFAULT_RATE_LIMIT, makeGuard, makeRateLimiter, SECURITY_HEADERS, type RateLimitOptions } from './security.js';
 import { SseHub, type SseOptions } from './sse.js';
 import { buildAssetMap } from './static.js';
-import { watchKnowledgeDir, watchProjectFiles } from './watchers.js';
+import { watchKnowledgeDir, watchMemoryDir, watchProjectFiles } from './watchers.js';
 
 export { clampContextChars, MAX_CONTEXT_CHARS } from './routes/context.js';
 
@@ -130,11 +131,13 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
   registerContextRoutes(ctx);
   registerGraphRoutes(ctx);
   registerActivityRoutes(ctx);
+  registerMemoryRoutes(ctx);
   registerEventRoutes(app, hub);
   registerStaticRoutes(app, assets);
 
   // ---- watchers ----------------------------------------------------------------------------
   const stopDocsWatcher = watchKnowledgeDir(ctx, feed);
+  const stopMemoryWatcher = watchMemoryDir(ctx, opts.watchDebounceMs === undefined ? undefined : Math.min(opts.watchDebounceMs, 150));
   await feed.seed();
   if (opts.watch) await watchProjectFiles(ctx, opts.watchDebounceMs);
 
@@ -148,6 +151,7 @@ export async function createServer(opts: ServerOptions): Promise<AthenaServer> {
       ctx.state.watcher = null;
       ctx.scheduler.close();
       stopDocsWatcher();
+      stopMemoryWatcher();
       events.close();
       await app.close();
       hub.close();

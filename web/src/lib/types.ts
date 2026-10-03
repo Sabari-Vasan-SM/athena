@@ -248,3 +248,45 @@ export interface AiStatus {
   providers: AiProviderStatus[];
   consent: boolean;
 }
+
+export type MemoryKind = 'decision' | 'gotcha' | 'bug' | 'convention' | 'todo' | 'fact';
+export type MemoryStatus = 'unreviewed' | 'confirmed' | 'superseded';
+
+/** One project-memory entry as GET /api/memory returns it. */
+export interface MemoryView {
+  id: string;
+  kind: MemoryKind;
+  status: MemoryStatus;
+  /** `developer` or `agent:<id>`. */
+  source: string;
+  title: string;
+  details: string;
+  files: string[];
+  tags: string[];
+  evidence?: string;
+  createdAt: string;
+  confirmedAt?: string;
+  supersedes?: string;
+  supersededBy?: string;
+  anchors: Record<string, string>;
+  /** FACT once a developer confirmed it; INFERRED otherwise. */
+  label: 'FACT' | 'INFERRED';
+  stale: boolean;
+  changedFiles: string[];
+  /** Possible prompt-injection warnings. */
+  flags: string[];
+}
+
+export interface MemoryCounts {
+  total: number;
+  unreviewed: number;
+  confirmed: number;
+  superseded: number;
+  stale: number;
+  flagged: number;
+}
+
+export interface MemoryList {
+  entries: MemoryView[];
+  counts: MemoryCounts;
+}
