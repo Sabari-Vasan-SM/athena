@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-10-03
+
+Agent memory: coding agents can now record what they learn — decisions and why, gotchas, bug root causes, conventions — and later sessions recall it. Memory lives in `.athena/memory/` as plain Markdown you commit and review like code. Anything an agent writes is `unreviewed` (INFERRED) until you confirm it (`athena memory review`, or the Memory page in `athena open`); entries turn `stale` when the files they describe change. Secrets are refused, and text that looks like it is trying to instruct the agent is flagged and kept out of recall.
+
+After upgrading, run `athena analyze` (or `athena agents add <agent>`) so your agent instructions mention `recall` and `remember`.
 
 ### Project memory
 
