@@ -266,7 +266,9 @@ export async function updateMemory(root: string, id: string, patch: Partial<Omit
   await mutate(root, id, async (e) => {
     let clean;
     try {
-      clean = normalizeInput({ kind: e.kind, title: patch.title ?? e.title, details: patch.details ?? e.details, files: patch.files ?? e.files, tags: patch.tags ?? e.tags, evidence: patch.evidence ?? e.evidence });
+      // A field present in the patch replaces the old value; an empty string clears details/evidence.
+      const pick = <K extends keyof typeof patch>(k: K, cur: MemoryEntry[K & keyof MemoryEntry]) => (k in patch ? patch[k] : cur);
+      clean = normalizeInput({ kind: e.kind, title: pick('title', e.title) as string, details: (pick('details', e.details) as string | undefined) ?? '', files: pick('files', e.files) as string[], tags: pick('tags', e.tags) as string[], evidence: (pick('evidence', e.evidence) as string | undefined) || undefined });
     } catch (err) {
       toAthenaError(err);
     }

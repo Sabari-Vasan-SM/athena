@@ -184,6 +184,8 @@ graph LR
   docs[".athena/*.md sections"] --> engine["Context engine"]
   graph --> engine
   rules["rules.md"] --> engine
+  memory[".athena/memory/*.md"] --> engine
+  mcp -. "remember (unreviewed)" .-> memory
   engine --> cli["athena context"]
   engine --> mcp["MCP: get_relevant_context"]
   mcp --> agents["Any MCP agent"]
@@ -193,7 +195,8 @@ graph LR
 
 - **The graph is derived, never asserted.** Every node comes from something the analysis detected; import edges are resolved against indexed files only. It is a cache (`graph.json`, gitignored), rebuilt with `athena graph --build`.
 - **Context selection is deterministic** so it can be tested, explained and trusted: areas from keywords, expansion from the graph, section ranking, and a character budget. The reason for each document is part of the output.
-- **MCP is a thin adapter** over the same services the CLI uses, which is why it cannot drift from what `athena` itself reports. Writes are refused unless `--allow-write` is passed.
+- **MCP is a thin adapter** over the same services the CLI uses, which is why it cannot drift from what `athena` itself reports. Writes are refused unless `--allow-write` is passed — except `remember`, which may only append an *unreviewed* (INFERRED) memory attributed to the client (`agent:<id>` from the MCP `clientInfo.name`, else `agent:mcp`); `--no-memory-write` disables it.
+- **Memory in context is bounded and fenced.** `getRelevantContext` recalls at most five memories (flagged possible prompt injections excluded, confirmed first) and spends at most 30% of the character budget on them. MCP returns memories inside `<athena-memory … trust="untrusted-data">` delimiters with a preface that they are notes, not instructions. A memory store that can't be read never fails context selection.
 - **AI stays at the edge.** No core path depends on a provider; enrichment sends redacted knowledge (never source), requires consent, and writes only to a separate, clearly-labelled INFERRED file.
 
 ## Decisions

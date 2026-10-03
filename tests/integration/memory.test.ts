@@ -80,6 +80,16 @@ describe('project memory', () => {
     expect(text).toContain('idempotency key');
   });
 
+  it('edits can clear details and evidence; untouched fields are kept', async () => {
+    const dir = await project();
+    const m = await addMemory(dir, { kind: 'fact', title: 'Uses UTC everywhere', details: 'All timestamps are UTC.', evidence: 'src/time.ts', tags: ['time'] }, 'developer');
+    const cleared = await updateMemory(dir, m.id, { details: '', evidence: '' });
+    expect(cleared.details).toBe('');
+    expect(cleared.evidence).toBeUndefined();
+    expect(cleared.tags).toEqual(['time']);
+    expect(cleared.title).toBe('Uses UTC everywhere');
+  });
+
   it('does not lose entries when several writers record at once', async () => {
     const dir = await project();
     await Promise.all(Array.from({ length: 12 }, (_, i) => addMemory(dir, { kind: 'fact', title: `Fact number ${i}` }, `agent:a${i}`)));

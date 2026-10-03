@@ -3,6 +3,8 @@ import { requireProjectRoot, type GlobalOptions } from '../context.js';
 
 export interface McpCommandOptions extends GlobalOptions {
   allowWrite?: boolean;
+  /** `--no-memory-write` sets this to false: the `remember` tool then refuses. */
+  memoryWrite?: boolean;
   signal?: AbortSignal;
 }
 
@@ -12,5 +14,5 @@ export interface McpCommandOptions extends GlobalOptions {
  */
 export async function mcpCommand(opts: McpCommandOptions): Promise<void> {
   const root = await requireProjectRoot(opts);
-  await runMcpServer({ root, allowWrite: opts.allowWrite, signal: opts.signal });
+  await runMcpServer({ root, allowWrite: opts.allowWrite, memoryWrite: opts.memoryWrite, signal: opts.signal });
 }

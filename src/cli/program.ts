@@ -118,7 +118,8 @@ export function buildProgram(): Command {
     .command('mcp')
     .description('Serve Athena project intelligence over MCP (stdio) for AI agents')
     .option('--allow-write', 'Permit the update_knowledge tool to apply changes (read-only by default)')
-    .action(run(async (o: { allowWrite?: boolean }, cmd: Command) => (await import('./commands/mcp.js')).mcpCommand({ ...globals(cmd), ...o, signal: controller.signal })));
+    .option('--no-memory-write', 'Disable the remember tool (agents cannot record unreviewed memories)')
+    .action(run(async (o: { allowWrite?: boolean; memoryWrite?: boolean }, cmd: Command) => (await import('./commands/mcp.js')).mcpCommand({ ...globals(cmd), ...o, signal: controller.signal })));
 
   const ai = program.command('ai').description('Optional AI provider integration (never required)');
   ai.command('status', { isDefault: true }).description('Show configured and available AI providers').action(run(async (_o: unknown, cmd: Command) => (await import('./commands/ai.js')).aiStatusCommand(globals(cmd))));
