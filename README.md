@@ -62,6 +62,10 @@ Generated content sits between `athena:generated` markers. Anything outside the 
 | `athena rules` | `list`, `add "<rule>" --section <name>`, `edit`, `enable`, `disable`, `remove` |
 | `athena agents` | `list`, `add <claude-code\|cursor\|codex\|copilot\|gemini-cli\|antigravity\|windsurf\|cline\|agents-md\|all>`, `remove` |
 | `athena activity` | Show AI agent activity observed through hooks (`-n`, `--agent`) |
+| `athena scan` | Unified scan: secrets, dependency audits and (on a change) review checks, with policy, baseline, triage and a quality gate (`--base`, `--staged`, `--changed`, `--only`, `-f text\|json\|markdown\|github\|sarif`, `-o`, `--fail-on`, `--policy-from`, `--offline`, `--list-rules`) |
+| `athena baseline` | `show`, `create`, `update`, `prune` — record existing findings so only new ones fail the gate |
+| `athena findings` | `list`, `show <fingerprint>`, `triage <fingerprint> <safe\|false-positive\|accepted-risk\|fixed\|to-review\|clear> --reason …` |
+| `athena explain <ruleId>` | What a rule detects and what to do about it |
 | `athena security` | Audit dependencies with the tools installed for this project, and report secret findings (`--fail-on`, `--last`, `--no-audit`) |
 | `athena review` | Check the current diff for facts worth reviewing, and list your rules and checklist (`--base`, `--no-fail`) |
 | `athena git-hook` | `install` (`--review`), `uninstall`, `status` — a Git pre-commit hook that blocks commits when knowledge is out of date |
@@ -170,12 +174,18 @@ $ athena activity
 ## Security and review
 
 ```bash
+athena scan                       # secrets + dependency audits, policy and quality gate
+athena scan --base origin/main -f sarif -o athena.sarif --policy-from origin/main   # in CI
+athena baseline create            # accept today's findings; only new ones fail the gate
+athena findings triage 5f65caf9 false-positive --reason "test fixture"
 athena security          # audit dependencies + report secret findings
 athena security --fail-on high   # exit 1 in CI
 athena review                     # check the current diff before you commit
 ```
 
 **`athena security`** runs the audit tools your project's ecosystems provide (`npm audit`, `pnpm audit`, `pip-audit`, `govulncheck`, `cargo audit`, `composer audit`) and reports what they find, attributed to the tool. Athena has no vulnerability database of its own: a tool that isn't installed is reported as **unknown**, never as "no problems". Results are stored in `.athena/security-scan.json` and recorded in `security.md` on the next `athena sync`.
+
+**`athena scan`** puts every check into one findings model. Each finding has a rule id, severity (`unrated` when the tool gave none — never treated as low), confidence, a FACT/DETECTED/INFERRED label, CWE, a location or package, and a fingerprint that never depends on a secret's value. Every report lists what was *not* covered (tools not installed, engines that failed, categories nothing scanned), and a failed engine fails the gate — it checked nothing. Optional committed files tune it: `.athena/policy.json` (gate thresholds, rule overrides, path excludes), `.athena/baseline.json`, `.athena/triage.json`, and inline `athena-ignore <ruleId> -- <reason>` comments (a reason is required). In CI, `--policy-from <base>` evaluates with the base branch's policy and reports any change to it on the branch as `review/policy-weakened`. Output formats: text, JSON, Markdown, GitHub annotations and SARIF 2.1.0 (for code scanning). Ratings A–E per category come with their basis; there is no numeric score.
 
 **`athena review`** checks facts about your current diff: secrets in added lines (a blocker, exit 1), committed env files, new dependencies, source changed without tests, API/schema/auth touchpoints, large files, debug leftovers, and whether Athena knowledge is stale. It then lists your enabled rules and the project's review checklist for you or your agent to apply — Athena does not claim to judge whether they are met, and it runs no AI.
 

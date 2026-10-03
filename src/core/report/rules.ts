@@ -59,6 +59,9 @@ const OTHER_RULES: RuleInfo[] = [
   review('vulnerabilities', 'Known vulnerable dependencies', 'The last dependency scan reported high or critical advisories.', 'Run the dependency scan for details and upgrade the affected packages.', ['CWE-1395']),
   review('knowledge', 'Project knowledge out of date', 'Athena knowledge (.athena/) does not reflect these changes.', 'Run `athena sync` so agents read current context.'),
   review('skipped', 'Changed files not checked', 'Some changed files could not be read (too large, binary or unreadable), so their contents were not checked.', 'Check these files yourself; Athena makes no claim about them.'),
+  review('policy-weakened', 'Security policy changed on this branch', 'The branch changes .athena/policy.json, baseline.json or triage.json, or adds an athena-ignore comment, compared with the base branch. High when the change relaxes the quality gate.', 'Have a maintainer review the change. With `--policy-from <base>` the gate keeps using the base branch policy until this merges.'),
+  review('suppression-without-reason', 'Inline suppression without a reason', 'An `athena-ignore <ruleId>` comment has no `-- <reason>`, so it was not applied.', 'Add a reason: `athena-ignore <ruleId> -- <why this is safe>`.'),
+  review('invalid-suppression', 'Inline suppression with no valid rule id', 'An `athena-ignore` comment does not name a valid rule id, so it was not applied.', 'Name exactly one rule: `athena-ignore secret/stripe-key -- <reason>`. Run `athena scan --list-rules` for ids.'),
 ];
 
 export const RULES: ReadonlyMap<string, RuleInfo> = new Map([...secretRules, ...OTHER_RULES].map((r) => [r.id, r]));

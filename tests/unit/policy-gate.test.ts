@@ -252,7 +252,7 @@ describe('gate truth table', () => {
     const g = gateOf([], {}, { coverage: [cov(), cov({ engine: 'pip-audit', category: 'dependency', status: 'unavailable', reason: 'not installed' })] });
     expect(g.passed).toBe(true);
     expect(g.warnings).toContain('pip-audit (dependency) unavailable: not installed');
-    expect(g.warnings.some((w) => /no engine scanned sast/.test(w))).toBe(true);
+    expect(g.warnings.some((w) => /no engine scanned .*\bsast\b/.test(w))).toBe(true);
   });
 });
 

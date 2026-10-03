@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### `athena scan` and friends
+
+- New `athena scan`: runs the secret scanner and dependency audits over the whole project, or with `--base <ref>` / `--staged` / `--changed` over a change (adding the review checks), then applies the policy, baseline, triage and inline suppressions and evaluates the quality gate. Exit 1 when the gate fails (`--no-fail` to report only), 2 when Git can't compute the requested change. `--only secrets,deps,review`, `--format text|json|markdown|github|sarif`, `-o <file>`, gate overrides `--fail-on`, `--min-confidence`, `--unrated`, plus `--no-baseline`, `--policy-from <ref>` and `--offline` (audits are skipped and reported as skipped). Full-project scans are saved to `.athena/findings.json`.
+- New `athena baseline show|create|update|prune`, `athena findings list|show|triage` (fingerprint prefixes of 6+ characters; a reason is required and committed) and `athena explain <ruleId>` / `athena scan --list-rules`.
+- New MCP tool `findings`: a read-only summary of the last scan (gate, ratings, coverage gaps, active findings with fingerprints), fenced as untrusted data and never containing secret values. It never starts a scan.
+- `athena security` keeps its flags, output and `--json` shape; it now also writes `.athena/findings.json`.
+
 ### Unified findings: secrets, dependencies and review checks
 
 - New `.athena/findings.json` (gitignored): every security check now reports into one findings model with stable, value-free fingerprints, severity (`critical`…`info`, plus `unrated`), confidence, a FACT/DETECTED/INFERRED label, CWE, location or package, the engine that reported it, and a coverage record per engine (files scanned and skipped, tools unavailable/failed/timed out/skipped offline).

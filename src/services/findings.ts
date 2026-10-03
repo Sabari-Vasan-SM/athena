@@ -31,6 +31,10 @@ export interface EvaluateOptions {
   rulesByEngine?: Record<string, number>;
   /** Size cap for files read to find inline suppressions. */
   maxFileBytes?: number;
+  /** Ignore the baseline (every finding counts as new). */
+  noBaseline?: boolean;
+  /** Command-line overrides of the policy's gate thresholds. */
+  gate?: Partial<Pick<Policy['gate'], 'failOn' | 'minConfidence' | 'unrated'>>;
 }
 
 export type PolicySource = { kind: 'working-tree' } | { kind: 'ref'; ref: string; commit: string; mergeBase: string };
@@ -65,6 +69,8 @@ export async function evaluateFindings(root: string, result: ScanResult, opts: E
       [policy, baseline, triage] = await Promise.all([loadPolicy(root), loadBaseline(root), loadTriage(root)]);
     }
     opts.signal?.throwIfAborted();
+    if (opts.noBaseline) baseline = null;
+    if (opts.gate) policy = { ...policy, gate: { ...policy.gate, ...Object.fromEntries(Object.entries(opts.gate).filter(([, v]) => v !== undefined)) } };
 
     const scanned = applyRuleOverrides(policy, result.findings);
     const sup = await applySuppressions(root, scanned, { maxBytes: opts.maxFileBytes });

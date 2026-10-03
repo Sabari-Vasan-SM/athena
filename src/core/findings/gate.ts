@@ -127,9 +127,8 @@ export function evaluateGate(result: Pick<ScanResult, 'findings' | 'coverage'>, 
       warnings.push(`${c.engine} (${c.category}) ${c.status}${c.reason ? `: ${c.reason}` : ''}`);
     }
   }
-  for (const cat of g.categories) {
-    if (!seenCategory.has(cat)) warnings.push(`no engine scanned ${cat} — the gate says nothing about it`);
-  }
+  const unscanned = g.categories.filter((cat) => !seenCategory.has(cat));
+  if (unscanned.length) warnings.push(`no engine scanned ${unscanned.join(', ')} — the gate says nothing about ${unscanned.length === 1 ? 'it' : 'them'}`);
   if (warned.length) warnings.push(`${plural(warned.length, 'unrated finding')} (the policy only warns on unrated findings)`);
 
   return {
