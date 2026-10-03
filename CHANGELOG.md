@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Project memory
+
+- New `athena memory` commands for the project memory in `.athena/memory/`: `list` (`--kind`, `--status`, `--stale`), `show`, `add` (`--kind`, `--title`, `--details` or `--details -` for stdin, repeatable `--file`/`--tag`, `--evidence`, `--supersedes`), `search`, `recall <task…>` (`--file`, `--tag`, `--limit`; ranked hits with reasons), `confirm <id…>`, `supersede <id> --by <id>`, `forget <id…>` (asks first; `--yes` in scripts), `edit`, `stale` and `review` (interactive in a terminal: confirm, forget or skip each agent-written entry). All support `--json`.
+- Entries you record are FACT; entries agents record are INFERRED until confirmed. Stale entries (linked files changed) and flagged entries (possible prompt injection) are marked and explained. A memory that contains a possible secret is refused without echoing the value.
+- `athena status` shows a memory line and a `memory` object (`total`, `unreviewed`, `stale`) in `--json`; `athena doctor` adds a Memory check when entries exist.
+- `athena clean` now says how many project memory entries it would delete (they are committed and shared with the team) before asking for confirmation.
+
 ## 0.3.0 — 2026-09-30
 
 Performance release: work is now proportional to what changed. On a 20,000-file repository (vs 0.2.1): a `sync --check` with nothing changed takes ~0.42 s instead of 2.9 s, `status` 0.14 s instead of 0.34 s, agent hooks start in ~28 ms instead of 112 ms, and peak memory is 20–52% lower in every scenario. The generated `model.json` is unchanged (golden-tested against the 0.2.1 analyzer). Benchmarks: `npm run bench`.

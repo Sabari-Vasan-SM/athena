@@ -5,8 +5,9 @@ import * as ui from '../ui/term.js';
 export async function statusCommand(opts: GlobalOptions & { signal?: AbortSignal }): Promise<void> {
   const root = await requireProjectRoot(opts);
   const report = await buildStatus(root, opts.signal);
+  const memory = await (await import('./memory.js')).memorySummary(root);
   if (ui.isJson()) {
-    ui.json(report);
+    ui.json(memory ? { ...report, memory: { total: memory.total, unreviewed: memory.unreviewed, stale: memory.stale } } : report);
     return;
   }
   const healthLabel = report.health === 'healthy' ? ui.c.green('Healthy') : report.health === 'needs-update' ? ui.c.yellow('Needs update') : ui.c.red('Degraded (missing knowledge files)');
@@ -37,6 +38,11 @@ export async function statusCommand(opts: GlobalOptions & { signal?: AbortSignal
     ui.line();
     ui.heading('Potentially affected');
     for (const a of report.affectedDocuments) ui.bullet(`${a.file} ${ui.dim(`(${a.reasons.join(', ')})`)}`);
+  }
+  if (memory?.total) {
+    ui.line();
+    const notes = [memory.unreviewed ? ui.c.yellow(`${memory.unreviewed} unreviewed`) : '', memory.stale ? ui.c.yellow(`${memory.stale} stale`) : ''].filter(Boolean);
+    ui.line(`Memory:   ${memory.total} ${memory.total === 1 ? 'entry' : 'entries'}${notes.length ? ` · ${notes.join(' · ')} ${ui.dim('— run `athena memory review` / `athena memory stale`')}` : ''}`);
   }
   ui.line();
   ui.line(`Synchronization: ${report.sync === 'up-to-date' ? ui.c.green('Up to date') : `${ui.c.yellow('Needs update')} ${ui.dim('— run `athena sync` to review')}`}`);

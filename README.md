@@ -58,6 +58,7 @@ Generated content sits between `athena:generated` markers. Anything outside the 
 | `athena sync` | Show which documents would change and why (with diffs), then apply after confirmation (`--yes`, `--dry-run`, `--diff`, `--check` for CI) |
 | `athena watch` | Watch the project and propose updates as files change (`--auto-apply` to write automatically) |
 | `athena doctor` | Check the installation, project, knowledge files and agent integrations |
+| `athena memory` | `list`, `show`, `add`, `search`, `recall`, `confirm`, `supersede`, `forget`, `edit`, `stale`, `review` — project memory in `.athena/memory/` (see [Project memory](#project-memory)) |
 | `athena rules` | `list`, `add "<rule>" --section <name>`, `edit`, `enable`, `disable`, `remove` |
 | `athena agents` | `list`, `add <claude-code\|cursor\|codex\|copilot\|gemini-cli\|antigravity\|windsurf\|cline\|agents-md\|all>`, `remove` |
 | `athena activity` | Show AI agent activity observed through hooks (`-n`, `--agent`) |
@@ -69,11 +70,44 @@ Generated content sits between `athena:generated` markers. Anything outside the 
 | `athena mcp` | Serve project intelligence to agents over MCP (stdio; `--allow-write`) |
 | `athena ai` | `status`, `enrich` — optional AI suggestions (`--consent`, `--dry-run`) |
 | `athena open` | Start (or reuse) the local web UI on `127.0.0.1`, watch for changes, and open it (`--port`, `--no-open`, `--no-watch`) |
-| `athena clean` | Remove `.athena/` and Athena integration blocks |
+| `athena clean` | Remove `.athena/` (including project memory) and Athena integration blocks |
 
 Global flags: `--json`, `--quiet`, `--cwd <dir>`, `--no-color`.
 
  They print *Not available yet* and exit with code 2. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Project memory
+
+Agents rediscover the same things every session: why the queue uses advisory locks, that tests need `TZ=UTC`, which bug the retry guard fixes. Athena keeps these as **project memory** in `.athena/memory/` — one Markdown file per kind (`decisions.md`, `gotchas.md`, `bugs.md`, `conventions.md`, `todos.md`, `facts.md`). Commit it: the team shares it and reviews changes in pull requests. Text you write outside the `athena:memory` markers is kept as written.
+
+- **Evidence labels.** An entry you record is `confirmed` (**FACT**). An entry an agent records is `unreviewed` (**INFERRED**) until you confirm it.
+- **Staleness.** Entries can link files. When a linked file changes, the entry is reported **stale** until you confirm it again (which re-anchors it), edit it or forget it.
+- **Safety.** Entries that look like a secret are refused (the value is never stored or printed). Entries that address the agent instead of describing the project (possible prompt injection) are flagged and never recalled automatically.
+
+```bash
+athena memory add --kind decision --title "Queue uses advisory locks" \
+  --file src/jobs/queue.ts --tag jobs --evidence "PR #412"
+git log -1 --format=%B | athena memory add --kind bug --title "Double refund on webhook retry" --details -
+athena memory list                 # --kind, --status unreviewed|confirmed|superseded, --stale
+athena memory review               # walk agent-written entries: [c]onfirm [e]dit later [f]orget [s]kip [q]uit
+athena memory recall "change the refund flow" --file src/api/refunds.ts
+athena memory stale                # entries whose linked files changed
+athena memory confirm m-1a2b3c m-4d5e6f
+athena memory supersede m-1a2b3c --by m-7a8b9c   # keep as history
+athena memory forget m-1a2b3c      # asks first; --yes in scripts
+```
+
+```text
+$ athena memory list
+ID        KIND       LABEL    STATUS             TITLE · SOURCE
+m-b74d24  gotcha     INFERRED unreviewed         Refund webhook retries twice · agent:claude-code
+m-815cd7  decision   FACT     confirmed  stale   Queue uses advisory locks · developer
+
+2 entries · 1 confirmed · 1 unreviewed · 1 stale · source: .athena/memory/
+1 entry written by agents is INFERRED until reviewed: run `athena memory review`.
+```
+
+Every command supports `--json`. `athena memory review` is interactive only in a terminal; elsewhere it lists the unreviewed entries and exits 0. `athena status` and `athena doctor` show how many entries are unreviewed or stale, and `athena clean` warns before deleting project memory.
 
 ## Keeping knowledge in sync
 

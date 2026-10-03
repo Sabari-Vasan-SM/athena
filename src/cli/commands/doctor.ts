@@ -4,7 +4,14 @@ import * as ui from '../ui/term.js';
 
 export async function doctorCommand(opts: GlobalOptions): Promise<number> {
   const cwd = await resolveCwd(opts);
-  const { checks } = await runDoctor(cwd);
+  const { checks, root } = await runDoctor(cwd);
+  if (root) {
+    const m = await (await import('./memory.js')).memorySummary(root);
+    if (m?.total) {
+      const pending = [m.unreviewed ? `${m.unreviewed} unreviewed` : '', m.stale ? `${m.stale} stale` : ''].filter(Boolean);
+      checks.push({ area: 'Memory', level: 'info', message: `${m.total} project memory ${m.total === 1 ? 'entry' : 'entries'}${pending.length ? ` (${pending.join(', ')})` : ''}`, hint: pending.length ? 'Review with `athena memory review` and `athena memory stale`.' : undefined });
+    }
+  }
   const errors = checks.filter((c) => c.level === 'error').length;
   if (ui.isJson()) {
     ui.json({ ok: errors === 0, checks });

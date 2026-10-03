@@ -20,8 +20,12 @@ export async function confirm(question: string): Promise<boolean> {
 export async function cleanCommand(opts: GlobalOptions & { yes?: boolean; keepAgents?: boolean }): Promise<void> {
   const root = await requireProjectRoot(opts);
   if (!opts.yes) {
-    if (!process.stdin.isTTY) throw new AthenaError('Refusing to delete .athena/ without confirmation.', 'Re-run with --yes in non-interactive environments.');
+    // .athena/memory/ is committed and shared with the team: say so before deleting it.
+    const memory = (await (await import('./memory.js')).memorySummary(root))?.total ?? 0;
+    const memoryNote = memory ? `${memory} project memory ${memory === 1 ? 'entry' : 'entries'} in .athena/memory/ (shared with your team)` : '';
+    if (!process.stdin.isTTY) throw new AthenaError(`Refusing to delete .athena/${memory ? `, including ${memoryNote},` : ''} without confirmation.`, 'Re-run with --yes in non-interactive environments.');
     ui.line(`This removes ${ui.c.bold('.athena/')} (including rules.md and your Developer Notes)${opts.keepAgents ? '' : ' and Athena blocks/files in agent configurations'}.`);
+    if (memory) ui.line(ui.c.yellow(`${ui.sym.warn} It also deletes ${memoryNote}.`));
     ui.line(ui.dim('If .athena/ is committed to Git you can restore it from history.'));
     if (!(await confirm('Continue?'))) {
       ui.line('Cancelled.');

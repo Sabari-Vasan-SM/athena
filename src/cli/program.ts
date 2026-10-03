@@ -165,6 +165,60 @@ export function buildProgram(): Command {
   rules.command('disable <number>').description('Disable a rule without deleting it').action(run(async (n: string, _o: unknown, cmd: Command) => (await import('./commands/rules.js')).rulesDisableCommand(n, globals(cmd))));
   rules.command('remove <number>').description('Delete a rule').action(run(async (n: string, _o: unknown, cmd: Command) => (await import('./commands/rules.js')).rulesRemoveCommand(n, globals(cmd))));
 
+  // Project memory: decisions, gotchas, bug causes, conventions… (.athena/memory/, committed).
+  const repeat = (value: string, prev: string[] = []) => [...prev, ...value.split(',').map((s) => s.trim()).filter(Boolean)];
+  const mem = () => import('./commands/memory.js');
+  const memory = program.command('memory').description('Record, review and recall project memory (.athena/memory/)');
+  memory
+    .command('list', { isDefault: true })
+    .description('List memory entries with their label (FACT/INFERRED), status and staleness')
+    .option('--kind <kind>', 'Only this kind (decision, gotcha, bug, convention, todo, fact)')
+    .option('--status <status>', 'Only this status (unreviewed, confirmed, superseded)')
+    .option('--stale', 'Only entries whose linked files changed since')
+    .action(run(async (o: { kind?: string; status?: string; stale?: boolean }, cmd: Command) => (await mem()).memoryListCommand({ ...globals(cmd), ...o })));
+  memory.command('show <id>').description('Show one entry in full: files, tags, evidence, staleness, warnings').action(run(async (id: string, _o: unknown, cmd: Command) => (await mem()).memoryShowCommand(id, globals(cmd))));
+  memory
+    .command('add')
+    .description('Record a memory as the developer (confirmed, FACT)')
+    .option('--kind <kind>', 'decision, gotcha, bug, convention, todo or fact')
+    .option('--title <title>', 'One-line summary')
+    .option('--details <text>', 'Longer explanation ("-" reads it from stdin)')
+    .option('--file <path>', 'Linked project file (repeatable); the entry goes stale when it changes', repeat)
+    .option('--tag <tag>', 'Tag (repeatable)', repeat)
+    .option('--evidence <text>', 'Where this was observed (commit, issue, test, log)')
+    .option('--supersedes <id>', 'Older memory this one replaces')
+    .action(run(async (o: { kind?: string; title?: string; details?: string; file?: string[]; tag?: string[]; evidence?: string; supersedes?: string }, cmd: Command) => (await mem()).memoryAddCommand({ ...globals(cmd), ...o })));
+  memory.command('search <query>').description('Find entries whose title, details, tags or files contain the text').action(run(async (q: string, _o: unknown, cmd: Command) => (await mem()).memorySearchCommand(q, globals(cmd))));
+  memory
+    .command('recall <task...>')
+    .description('Rank the memory relevant to a task (what an agent would be given), with reasons')
+    .option('--file <path>', 'File you are about to work on (repeatable)', repeat)
+    .option('--tag <tag>', 'Tag to match (repeatable)', repeat)
+    .option('-n, --limit <count>', 'Maximum entries (default 8)')
+    .action(run(async (task: string[], o: { file?: string[]; tag?: string[]; limit?: string }, cmd: Command) => (await mem()).memoryRecallCommand(task, { ...globals(cmd), ...o })));
+  memory.command('confirm <ids...>').description('Confirm entries as FACT (and re-anchor them to the current files)').action(run(async (ids: string[], _o: unknown, cmd: Command) => (await mem()).memoryConfirmCommand(ids, globals(cmd))));
+  memory
+    .command('supersede <id>')
+    .description('Mark an entry as replaced by a newer one (kept as history)')
+    .option('--by <id>', 'The newer memory')
+    .action(run(async (id: string, o: { by?: string }, cmd: Command) => (await mem()).memorySupersedeCommand(id, { ...globals(cmd), ...o })));
+  memory
+    .command('forget <ids...>')
+    .description('Delete entries')
+    .option('-y, --yes', 'Skip confirmation')
+    .action(run(async (ids: string[], o: { yes?: boolean }, cmd: Command) => (await mem()).memoryForgetCommand(ids, { ...globals(cmd), ...o })));
+  memory
+    .command('edit <id>')
+    .description('Change an entry (fields you pass replace the old values)')
+    .option('--title <title>', 'New title')
+    .option('--details <text>', 'New details ("-" reads them from stdin)')
+    .option('--file <path>', 'Linked files (repeatable; replaces the list)', repeat)
+    .option('--tag <tag>', 'Tags (repeatable; replaces the list)', repeat)
+    .option('--evidence <text>', 'New evidence')
+    .action(run(async (id: string, o: { title?: string; details?: string; file?: string[]; tag?: string[]; evidence?: string }, cmd: Command) => (await mem()).memoryEditCommand(id, { ...globals(cmd), ...o })));
+  memory.command('stale').description('Entries whose linked files changed since they were recorded or confirmed').action(run(async (_o: unknown, cmd: Command) => (await mem()).memoryStaleCommand(globals(cmd))));
+  memory.command('review').description('Walk through unreviewed (agent-written) entries: confirm, forget or skip').action(run(async (_o: unknown, cmd: Command) => (await mem()).memoryReviewCommand(globals(cmd))));
+
   const agents = program.command('agents').description('Manage AI agent integrations');
   agents.command('list', { isDefault: true }).description('Show supported agents and integration status').action(run(async (_o: unknown, cmd: Command) => (await import('./commands/agents.js')).agentsListCommand(globals(cmd))));
   agents.command('add <agents...>').description('Configure integrations (claude-code, cursor, codex, copilot, gemini-cli, antigravity, windsurf, cline, agents-md, or "all")').action(run(async (names: string[], _o: unknown, cmd: Command) => (await import('./commands/agents.js')).agentsAddCommand(names, globals(cmd))));
