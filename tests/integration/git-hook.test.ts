@@ -65,7 +65,12 @@ async function initializedRepo(files: Record<string, string> = {}): Promise<stri
 }
 
 const hookPath = (dir: string) => path.join(dir, '.git', 'hooks', 'pre-commit');
-const status = async (dir: string) => JSON.parse((await runCli(['git-hook', 'status', '--json'], dir)).stdout) as { installed: boolean; review: boolean; staged: boolean; ownsFile: boolean; manager: string | null };
+const status = async (dir: string) => {
+  const r = await runCli(['git-hook', 'status', '--json'], dir);
+  expect(r.code, `git-hook status failed: ${r.stderr}`).toBe(0);
+  expect(r.stdout, `empty stdout; stderr: ${r.stderr}`).not.toBe('');
+  return JSON.parse(r.stdout) as { installed: boolean; review: boolean; staged: boolean; ownsFile: boolean; manager: string | null };
+};
 
 describe('athena git-hook', () => {
   it('installs an executable hook, is idempotent, and uninstalls cleanly', async () => {

@@ -59,7 +59,7 @@ export interface CliResult {
 
 export function runCli(args: string[], cwd: string, env: Record<string, string> = {}): Promise<CliResult> {
   return new Promise((resolve) => {
-    execFile(process.execPath, [CLI, ...args], { cwd, env: { ...process.env, NO_COLOR: '1', CI: '1', ...env }, timeout: 60_000 }, (err, stdout, stderr) => {
+    execFile(process.execPath, [CLI, ...args], { cwd, env: { ...process.env, NO_COLOR: '1', CI: '1', ATHENA_DEBUG: '1', ...env }, timeout: 60_000 }, (err, stdout, stderr) => {
       const e = err as (Error & { code?: unknown; signal?: string | null; killed?: boolean }) | null;
       const code = e ? (typeof e.code === 'number' ? e.code : 1) : 0;
       // Make a killed or crashed process visible instead of a bare exit code 1.

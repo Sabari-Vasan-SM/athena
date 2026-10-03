@@ -16,7 +16,10 @@ function onSignal(): void {
 }
 // `athena … | head` closes stdout early; exit quietly instead of crashing on EPIPE.
 process.stdout.on('error', (err: NodeJS.ErrnoException) => {
-  if (err.code === 'EPIPE') process.exit(0);
+  if (err.code === 'EPIPE') {
+    if (process.env.ATHENA_DEBUG) process.stderr.write('athena: stdout was closed by the reader (EPIPE); exiting quietly\n');
+    process.exit(0);
+  }
   throw err;
 });
 process.on('SIGINT', onSignal);

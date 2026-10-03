@@ -445,8 +445,8 @@ describe('CLI', () => {
     expect(ai.stdout).toContain('Ollama (local)');
 
     const dry = await runCli(['ai', 'enrich', '--dry-run'], dir);
-    expect(dry.code).toBe(0);
-    expect(dry.stdout).toMatch(/no source code/);
+    expect(dry.code, dry.stderr).toBe(0);
+    expect(dry.stdout, `stderr: ${dry.stderr}`).toMatch(/no source code/);
   }, 120_000);
 });
 
