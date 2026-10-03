@@ -1,0 +1,9 @@
+::error file=src/pay.ts,line=12,col=14,title=Athena [critical]%3A Stripe secret key in source::A Stripe secret key appears in source. Rotate it. (secret/stripe-key, DETECTED, athena)
+::error file=package-lock.json,title=Athena [high]%3A lodash 4.17.20 has a known vulnerability::Command injection in lodash (GHSA-35jh-r3h4-6jhm). Fixed in 4.17.21. (dependency/vulnerable-package, FACT, npm-audit)
+::warning file=config/app.ts,line=3,title=Athena [unrated]%3A Potential hardcoded secret-like assignment::A high-entropy value is assigned to apiKey. (secret/generic-secret-assignment, INFERRED, athena)
+::warning file=.env.production,title=Athena [medium]%3A Environment file in the change::Environment file included in the change. (review/env-file, DETECTED, athena)
+::error title=Athena scan::Athena: 4 open findings; not counted: 1 baselined, 1 suppressed, 1 triaged.
+::error title=Athena gate::Gate failed: 1 open critical finding (fail on: high); Coverage incomplete: pip-audit failed
+::warning title=Athena coverage gap::pip-audit (dependency, requirements.txt): failed — pip-audit exited with code 2
+::notice title=Athena coverage gap::semgrep (sast): unavailable — semgrep is not installed
+::notice title=Athena coverage::Not covered by any engine: sast, iac, license, quality, memory.

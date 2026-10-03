@@ -1,0 +1,275 @@
+{
+  "schemaVersion": 1,
+  "tool": {
+    "name": "athena",
+    "version": "0.5.0"
+  },
+  "fingerprintVersion": 1,
+  "scope": {
+    "mode": "changed",
+    "base": "main",
+    "files": 8
+  },
+  "scannedAt": "2026-10-01T12:00:00.000Z",
+  "durationMs": 1300,
+  "summary": {
+    "total": 7,
+    "open": 4,
+    "openBySeverity": {
+      "critical": 1,
+      "high": 1,
+      "medium": 1,
+      "low": 0,
+      "info": 0,
+      "unrated": 1
+    },
+    "openPotential": 1,
+    "baselined": 1,
+    "suppressed": 1,
+    "triaged": 1,
+    "excluded": 0
+  },
+  "findings": [
+    {
+      "fingerprint": "050891a776137d7ee4577da4a890ccec",
+      "ruleId": "secret/stripe-key",
+      "category": "secret",
+      "severity": "critical",
+      "confidence": "high",
+      "label": "DETECTED",
+      "potential": false,
+      "title": "Stripe secret key in source",
+      "message": "A Stripe secret key appears in source. Rotate it.",
+      "cwe": [
+        "CWE-798"
+      ],
+      "owasp": [],
+      "location": {
+        "file": "src/pay.ts",
+        "startLine": 12,
+        "startColumn": 14
+      },
+      "engine": {
+        "id": "athena"
+      },
+      "alsoReportedBy": [
+        "gitleaks"
+      ],
+      "status": "open"
+    },
+    {
+      "fingerprint": "10bf9e4df08619bcdb82c883a2336fe5",
+      "ruleId": "dependency/vulnerable-package",
+      "category": "dependency",
+      "severity": "high",
+      "confidence": "high",
+      "label": "FACT",
+      "potential": false,
+      "title": "lodash 4.17.20 has a known vulnerability",
+      "message": "Command injection in lodash (GHSA-35jh-r3h4-6jhm). Fixed in 4.17.21.",
+      "cwe": [],
+      "owasp": [],
+      "package": {
+        "ecosystem": "npm",
+        "name": "lodash",
+        "version": "4.17.20",
+        "manifest": "package-lock.json",
+        "advisoryIds": [
+          "GHSA-35jh-r3h4-6jhm"
+        ],
+        "fixedIn": "4.17.21",
+        "fixAvailable": true
+      },
+      "engine": {
+        "id": "npm-audit",
+        "version": "10.9.0"
+      },
+      "alsoReportedBy": [],
+      "help": {
+        "text": "Upgrade lodash to 4.17.21 or later.",
+        "url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm"
+      },
+      "status": "open"
+    },
+    {
+      "fingerprint": "c17bbb2035f40cf21e17a28ffe6de2b2",
+      "ruleId": "secret/jwt",
+      "category": "secret",
+      "severity": "high",
+      "confidence": "high",
+      "label": "DETECTED",
+      "potential": false,
+      "title": "JSON Web Token in source",
+      "message": "A JWT appears in source.",
+      "cwe": [],
+      "owasp": [],
+      "location": {
+        "file": "tests/fixtures/token.ts",
+        "startLine": 1
+      },
+      "engine": {
+        "id": "athena"
+      },
+      "alsoReportedBy": [],
+      "status": "suppressed"
+    },
+    {
+      "fingerprint": "b5bb3334ff1bf50f7341adddb746020b",
+      "ruleId": "secret/generic-secret-assignment",
+      "category": "secret",
+      "severity": "unrated",
+      "confidence": "low",
+      "label": "INFERRED",
+      "potential": true,
+      "title": "Hardcoded secret-like assignment",
+      "message": "A high-entropy value is assigned to apiKey.",
+      "cwe": [],
+      "owasp": [],
+      "location": {
+        "file": "config/app.ts",
+        "startLine": 3
+      },
+      "engine": {
+        "id": "athena"
+      },
+      "alsoReportedBy": [],
+      "status": "open"
+    },
+    {
+      "fingerprint": "6be90468242f43e5421a735c48a6dad6",
+      "ruleId": "review/env-file",
+      "category": "review",
+      "severity": "medium",
+      "confidence": "high",
+      "label": "DETECTED",
+      "potential": false,
+      "title": "Environment file in the change",
+      "message": "Environment file included in the change.",
+      "cwe": [],
+      "owasp": [],
+      "location": {
+        "file": ".env.production"
+      },
+      "engine": {
+        "id": "athena"
+      },
+      "alsoReportedBy": [],
+      "status": "open"
+    },
+    {
+      "fingerprint": "9fd11ef591d6eb138a50657390a2d37c",
+      "ruleId": "review/leftovers",
+      "category": "review",
+      "severity": "low",
+      "confidence": "high",
+      "label": "DETECTED",
+      "potential": false,
+      "title": "Debug statement added",
+      "message": "console.log left in code.",
+      "cwe": [],
+      "owasp": [],
+      "location": {
+        "file": "src/old.ts",
+        "startLine": 40
+      },
+      "engine": {
+        "id": "athena"
+      },
+      "alsoReportedBy": [],
+      "status": "baselined"
+    },
+    {
+      "fingerprint": "d501a7ff0315a6e86d9b301e07092640",
+      "ruleId": "review/auth",
+      "category": "review",
+      "severity": "info",
+      "confidence": "high",
+      "label": "DETECTED",
+      "potential": false,
+      "title": "Authentication code changed",
+      "message": "Authentication/authorization code changed.",
+      "cwe": [],
+      "owasp": [],
+      "location": {
+        "file": "src/auth/session.ts"
+      },
+      "engine": {
+        "id": "athena"
+      },
+      "alsoReportedBy": [],
+      "status": "triaged:accepted-risk"
+    }
+  ],
+  "coverage": [
+    {
+      "engine": "athena-secrets",
+      "category": "secret",
+      "status": "ok",
+      "languages": [],
+      "filesScanned": 120,
+      "filesSkipped": {
+        "tooLarge": 2,
+        "binary": 1,
+        "minified": 0,
+        "unreadable": 0,
+        "unsupported": 0
+      },
+      "network": false,
+      "durationMs": 40
+    },
+    {
+      "engine": "npm-audit",
+      "category": "dependency",
+      "status": "ok",
+      "target": "package-lock.json",
+      "languages": [],
+      "network": true,
+      "durationMs": 900
+    },
+    {
+      "engine": "pip-audit",
+      "category": "dependency",
+      "status": "failed",
+      "reason": "pip-audit exited with code 2",
+      "target": "requirements.txt",
+      "languages": [],
+      "network": true,
+      "durationMs": 300
+    },
+    {
+      "engine": "semgrep",
+      "category": "sast",
+      "status": "unavailable",
+      "reason": "semgrep is not installed",
+      "languages": [],
+      "network": false,
+      "durationMs": 0
+    },
+    {
+      "engine": "athena-review",
+      "category": "review",
+      "status": "ok",
+      "languages": [],
+      "filesScanned": 8,
+      "network": false,
+      "durationMs": 12
+    }
+  ],
+  "gate": {
+    "passed": false,
+    "reasons": [
+      "1 open critical finding (fail on: high)",
+      "Coverage incomplete: pip-audit failed"
+    ]
+  },
+  "ratings": {
+    "secret": {
+      "grade": "E",
+      "basis": "1 open critical secret"
+    },
+    "dependency": {
+      "grade": "D",
+      "basis": "1 open high advisory"
+    }
+  }
+}
